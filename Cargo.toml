@@ -5,6 +5,10 @@ edition = "2024"
 author = "ju6ge <judge@felixrichter.tech>"
 license = "AGPL-3.0"
 
+[package.metadata.release]
+tag-name = "{{version}}"
+publish = false
+
 [dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
 paperless-api-client = "6.0.1"
