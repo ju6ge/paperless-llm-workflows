@@ -10,6 +10,55 @@
     "version": "0.3.0"
   },
   "paths": {
+    "/decision": {
+      "post": {
+        "tags": [
+          "llm_workflow_trigger"
+        ],
+        "summary": "ask a question that can be answered with true or false about the document",
+        "description": "The goal of this endpoint is to enable decision based workflows in paperless. Ask a question about the document and\nif the answer is true the document will be assigend the `true_tag`. If not and the `false_tag` is specified it will be assigned.\nThis enables doing `if/else` style workflows by using tagging to conditionally trigger further processing steps.\n\nIf neither `false_tag` nor `true_tag` are specified the request will be discared since the result would have no effect!",
+        "operationId": "decision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "document_url",
+                  "question"
+                ],
+                "properties": {
+                  "document_url": {
+                    "type": "string",
+                    "description": "url of the document that should be processed"
+                  },
+                  "false_tag": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "optional tag to assign if the answer is false"
+                  },
+                  "question": {
+                    "type": "string",
+                    "description": "question about the document, should be answerable with true/false"
+                  },
+                  "true_tag": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "optional tag to assign if answer is true"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {}
+      }
+    },
     "/fill/custom_fields": {
       "post": {
         "tags": [
