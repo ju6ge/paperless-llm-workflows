@@ -21,7 +21,7 @@ pub async fn processed_doc_update(
         .partial_update(
             doc_id,
             &PatchedDocumentRequest {
-                correspondent: correspondent,
+                correspondent,
                 document_type: None,
                 storage_path: None,
                 title: None,
@@ -296,14 +296,14 @@ pub(crate) async fn get_all_users(api_client: &mut Client) -> Vec<User> {
 pub(crate) async fn create_tag(
     api_client: &mut Client,
     tag_user: Option<&User>,
-    tag_name: &String,
-    tag_color: &String,
+    tag_name: &str,
+    tag_color: &str,
 ) -> Result<Tag, paperless_api_client::types::error::Error> {
     api_client
         .tags()
         .create(&TagRequest {
-            name: tag_name.clone(),
-            color: Some(tag_color.clone()),
+            name: tag_name.to_owned(),
+            color: Some(tag_color.to_owned()),
             match_: Some("".to_string()),
             matching_algorithm: Some(0),
             is_insensitive: Some(true),

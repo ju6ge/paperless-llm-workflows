@@ -182,13 +182,13 @@ async fn handle_custom_field_prediction(
                     doc.id,
                     cf_value
                 );
-                doc.custom_fields.as_mut().map(|doc_custom_fields| {
+                if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
                     for doc_cf_i in doc_custom_fields.iter_mut() {
                         if doc_cf_i.field == cf_value.field {
-                            *doc_cf_i = cf_value.clone()
+                            *doc_cf_i = cf_value.clone();
                         }
                     }
-                });
+                }
             }
         }
     }
@@ -228,18 +228,16 @@ async fn handle_decision(
 
     if let Some(true_tag) = true_tag
         && extracted_decision.answer_bool
+        && !doc.tags.contains(&true_tag.id)
     {
-        if !doc.tags.contains(&true_tag.id) {
-            doc.tags.push(true_tag.id);
-        }
+        doc.tags.push(true_tag.id);
     }
 
     if let Some(false_tag) = false_tag
         && !extracted_decision.answer_bool
+        && !doc.tags.contains(&false_tag.id)
     {
-        if !doc.tags.contains(&false_tag.id) {
-            doc.tags.push(false_tag.id);
-        }
+        doc.tags.push(false_tag.id);
     }
 
     Ok(())
@@ -442,8 +440,8 @@ async fn decision(
 
     let process_type = ProcessingType::DecsionTagFlow {
         question: params.question.clone(),
-        true_tag: true_tag,
-        false_tag: false_tag,
+        true_tag,
+        false_tag,
     };
 
     let generic_webhook_params = WebhookParams {
@@ -479,7 +477,7 @@ async fn suggest_correspondent(
     config: Data<Config>,
     document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
 ) -> Result<HttpResponse, WebhookError> {
-    let _ = params
+    params
         .handle_request(
             status_tags,
             api_client,
@@ -517,7 +515,7 @@ async fn custom_field_prediction(
     config: Data<Config>,
     document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
 ) -> Result<HttpResponse, WebhookError> {
-    let _ = params
+    params
         .handle_request(
             status_tags,
             api_client,
@@ -565,18 +563,18 @@ fn merge_document_status(
         ProcessingType::CustomFieldPrediction => {
             if let Some(updated_custom_fields) = &updated_doc.custom_fields {
                 for updated_cf in updated_custom_fields {
-                    doc.custom_fields.as_mut().map(|doc_custom_fields| {
+                    if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
                         let mut cf_found = false;
                         for doc_cf_i in &mut *doc_custom_fields {
                             if doc_cf_i.field == updated_cf.field {
                                 cf_found = true;
-                                doc_cf_i.value = updated_cf.value.clone()
+                                doc_cf_i.value = updated_cf.value.clone();
                             }
                         }
                         if !cf_found {
                             doc_custom_fields.push(updated_cf.clone());
                         }
-                    });
+                    }
                 }
             }
         }
@@ -634,7 +632,7 @@ async fn document_updater(
                 .document
                 .tags
                 .iter()
-                .map(|t| *t)
+                .copied()
                 .filter(|t| *t != status_tags.processing.id)
                 .chain(if doc_req.overwrite_finshed_tag.is_none() {
                     [status_tags.finished.id].into_iter()
@@ -647,7 +645,7 @@ async fn document_updater(
             let mut updated_cf: Option<Vec<CustomFieldInstance>> = None;
             let mut updated_crrspdnt: Option<i64> = None;
 
-            for doc_processing_steps in vec![doc_req.processing_type]
+            for doc_processing_steps in [doc_req.processing_type]
                 .iter()
                 .chain(
                     defered_doc_updates
@@ -690,19 +688,17 @@ async fn document_updater(
             });
         } else {
             // remember how document has been processed until now for defered update later
-            if defered_doc_updates.contains_key(&doc_req.document.id) {
-                if defered_doc_updates
-                    .get(&doc_req.document.id)
-                    .is_some_and(|v| v.contains(&doc_req.processing_type))
-                {
-                    continue;
-                } else {
-                    if let Some(v) = defered_doc_updates.get_mut(&doc_req.document.id).as_mut() {
-                        v.push(doc_req.processing_type);
-                    }
-                }
-            } else {
-                defered_doc_updates.insert(doc_req.document.id, vec![doc_req.processing_type]);
+            if let std::collections::btree_map::Entry::Vacant(e) =
+                defered_doc_updates.entry(doc_req.document.id)
+            {
+                e.insert(vec![doc_req.processing_type]);
+            } else if defered_doc_updates
+                .get(&doc_req.document.id)
+                .is_some_and(|v| v.contains(&doc_req.processing_type))
+            {
+                continue;
+            } else if let Some(v) = defered_doc_updates.get_mut(&doc_req.document.id).as_mut() {
+                v.push(doc_req.processing_type);
             }
         }
     }
@@ -722,13 +718,13 @@ async fn document_processor(
     >,
 ) {
     while !*STOP_FLAG.read().await {
-        while PROCESSING_QUEUE.read().await.len() > 0 {
+        while !PROCESSING_QUEUE.read().await.is_empty() {
             let model_path = config.model.clone();
             {
                 let mut model_singleton = MODEL_SINGLETON.lock().await;
                 if model_singleton.is_none() {
                     *model_singleton = spawn_blocking(move || {
-                        LLModelExtractor::new(&Path::new(&model_path), config.num_gpu_layers, None)
+                        LLModelExtractor::new(Path::new(&model_path), config.num_gpu_layers, None)
                     })
                     .await
                     .map_err(|err| {
@@ -805,7 +801,7 @@ async fn document_processor(
             }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
-        if PROCESSING_QUEUE.read().await.len() == 0 && MODEL_SINGLETON.lock().await.is_some() {
+        if PROCESSING_QUEUE.read().await.is_empty() && MODEL_SINGLETON.lock().await.is_some() {
             // No Documents need processing drop model
             log::info!("Unloading Model due to processing queue being empty!");
             let mut model_singleton = MODEL_SINGLETON.lock().await;
@@ -862,7 +858,7 @@ pub async fn run_server(
         rx_update,
     ));
     let webhook_server = HttpServer::new(move || {
-        let app = App::new()
+        App::new()
             .app_data(Data::new(tx.clone()))
             .app_data(Data::new(config.clone()))
             .app_data(Data::new(paperless_api_client.clone()))
@@ -872,8 +868,7 @@ pub async fn run_server(
                     .config(utoipa_swagger_ui::Config::default().use_base_layout())
                     .url("/docs/openapi.json", DocumentProcessingApiSpec::openapi()),
             )
-            .service(DocumentProcessingApi);
-        app
+            .service(DocumentProcessingApi)
     })
     .bind(("0.0.0.0", 8123))?
     .run();

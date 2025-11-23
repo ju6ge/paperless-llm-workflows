@@ -62,8 +62,7 @@ impl FieldExtract {
 
         all_correspondents
             .iter()
-            .filter(|c| c.name == parsed_value)
-            .next()
+            .find(|c| c.name == parsed_value)
             .ok_or(FieldError::CorrespondentNotFound(parsed_value))
             .cloned()
     }
@@ -172,10 +171,7 @@ pub(crate) struct FieldSelect {
 }
 
 pub(crate) fn custom_field_learning_supported(cf: &CustomField) -> bool {
-    match cf.data_type {
-        DataTypeEnum::Documentlink | DataTypeEnum::Url => false,
-        _ => true,
-    }
+    !matches!(cf.data_type, DataTypeEnum::Documentlink | DataTypeEnum::Url)
 }
 
 #[derive(Debug)]
@@ -216,7 +212,7 @@ fn guide_value_from_custom_field(cf: &CustomField) -> Option<GuideDef> {
                 return None;
             };
             let enum_values = serde_json::to_value(
-                &select_options
+                select_options
                     .select_options
                     .into_iter()
                     .map(|o| o.label)
@@ -249,13 +245,13 @@ pub(crate) fn schema_from_correspondents(crrspd_list: &[Correspondent]) -> schem
     });
 
     let mut base_schema = schema_for!(FieldExtract);
-    base_schema.get_mut("properties").map(|properties| {
-        properties.get_mut("description").map(|description_schema| {
+    if let Some(properties) = base_schema.get_mut("properties") {
+        if let Some(description_schema) = properties.get_mut("description") {
             *description_schema = json_schema!({ "const": "Correspondent" })
                 .as_value()
-                .clone()
-        });
-        properties.get_mut("format").map(|legend_schema| {
+                .clone();
+        }
+        if let Some(legend_schema) = properties.get_mut("format") {
             *legend_schema = json_schema!({
                 "type": "object",
                 "properties": {
@@ -267,8 +263,8 @@ pub(crate) fn schema_from_correspondents(crrspd_list: &[Correspondent]) -> schem
             })
             .as_value()
             .clone();
-        });
-        properties.as_object_mut().map(|prop| {
+        }
+        if let Some(prop) = properties.as_object_mut() {
             let key_name = "most_likely_value_reasoning_summarized";
             prop.shift_insert(
                 2,
@@ -277,17 +273,16 @@ pub(crate) fn schema_from_correspondents(crrspd_list: &[Correspondent]) -> schem
             );
             prop.get_mut("required")
                 .map(|required| required.as_array_mut().map(|rv| rv.push(json!(key_name))));
-        });
-        properties
-            .get_mut("value")
-            .map(|value_schema| *value_schema = type_allowed_correspondens.as_value().clone());
-        properties.get_mut("alternative_values").map(|array| {
-            array
-                .get_mut("items")
-                .map(|value_schema| *value_schema = type_allowed_correspondens.as_value().clone());
-        });
-        properties
-    });
+        }
+        if let Some(value_schema) = properties.get_mut("value") {
+            *value_schema = type_allowed_correspondens.as_value().clone();
+        }
+        if let Some(array) = properties.get_mut("alternative_values")
+            && let Some(value_schema) = array.get_mut("items")
+        {
+            *value_schema = type_allowed_correspondens.as_value().clone();
+        }
+    }
     base_schema
 }
 
@@ -296,12 +291,11 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     // set field of description schema as a constant string value matching the name
     // of the custom field. This should guide the llm token generation to extract the
     // desired information from the document
-    base_schema.get_mut("properties").map(|properties| {
-        properties.get_mut("description").map(|description_schema| {
-            *description_schema = json_schema!({ "const": cf.name }).as_value().clone()
-        });
-        properties
-    });
+    if let Some(properties) = base_schema.get_mut("properties")
+        && let Some(description_schema) = properties.get_mut("description")
+    {
+        *description_schema = json_schema!({ "const": cf.name }).as_value().clone();
+    }
     let field_schema = match cf.data_type {
         paperless_api_client::types::DataTypeEnum::String => schema_for!(String),
         paperless_api_client::types::DataTypeEnum::Date => schema_for!(chrono::NaiveDate),
@@ -316,7 +310,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
                 return None;
             };
             let enum_values = serde_json::to_value(
-                &select_options
+                select_options
                     .select_options
                     .into_iter()
                     .map(|o| o.label)
@@ -333,7 +327,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
             return None;
         }
     };
-    if let Some(guide_value) = guide_value_from_custom_field(&cf) {
+    if let Some(guide_value) = guide_value_from_custom_field(cf) {
         base_schema.get_mut("properties").map(|properties| {
             properties.get_mut("format").map(|legend_schema| {
                 *legend_schema = json_schema!({
@@ -351,24 +345,23 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
         });
     } else {
         // remove field_legend from schema
-        base_schema.get_mut("properties").map(|properties| {
-            if let Some(prop) = properties.as_object_mut() {
-                prop.remove("format");
-            }
-        });
+        if let Some(properties) = base_schema.get_mut("properties")
+            && let Some(prop) = properties.as_object_mut()
+        {
+            prop.remove("format");
+        }
     }
     // set the schema of the field value according to the type of custom field
-    base_schema.get_mut("properties").map(|properties| {
-        properties
-            .get_mut("value")
-            .map(|value_schema| *value_schema = field_schema.as_value().clone());
-        properties.get_mut("alternative_values").map(|array| {
-            array
-                .get_mut("items")
-                .map(|value_schema| *value_schema = field_schema.as_value().clone());
-        });
-        properties
-    });
+    if let Some(properties) = base_schema.get_mut("properties") {
+        if let Some(value_schema) = properties.get_mut("value") {
+            *value_schema = field_schema.as_value().clone();
+        }
+        if let Some(array) = properties.get_mut("alternative_values")
+            && let Some(value_schema) = array.get_mut("items")
+        {
+            *value_schema = field_schema.as_value().clone();
+        }
+    }
     Some(base_schema)
 }
 

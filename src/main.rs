@@ -62,11 +62,10 @@ async fn main() {
 
     let _model_path = Path::new(&config.model)
         .canonicalize()
-        .map_err(|err| {
+        .inspect_err(|_| {
             log::error!(
                 "Could not find model file! Can not run without a language model! … Stop execution!"
             );
-            err
         })
         .unwrap();
 
@@ -78,8 +77,7 @@ async fn main() {
 
     let user = users
         .iter()
-        .filter(|user| user.username == config.tag_user_name)
-        .next()
+        .find(|user| user.username == config.tag_user_name)
         .or_else(|| {
             log::warn!(
                 "configured user `{}` could not be found, running without user!",
@@ -89,12 +87,7 @@ async fn main() {
         });
 
     //make sure tags for processing and finshed exists
-    let processing_tag = if tags
-        .iter()
-        .filter(|t| t.name == config.processing_tag)
-        .next()
-        .is_none()
-    {
+    let processing_tag = if !tags.iter().any(|t| t.name == config.processing_tag) {
         requests::create_tag(
             &mut api_client,
             user,
@@ -102,31 +95,23 @@ async fn main() {
             &config.processing_color,
         )
         .await
-        .map_err(|err| {
+        .inspect_err(|err| {
             log::error!("could not create processing tag: {err}");
-            err
         })
-        .map(|tag| {
+        .inspect(|_| {
             log::info!(
                 "created processing tag `{}` to paperless ",
                 config.processing_tag
             );
-            tag
         })
         .ok()
     } else {
         tags.iter()
-            .filter(|t| t.name == config.processing_tag)
-            .next()
-            .map(|t| t.clone())
+            .find(|t| t.name == config.processing_tag)
+            .cloned()
     };
 
-    let finished_tag = if tags
-        .iter()
-        .filter(|t| t.name == config.finished_tag)
-        .next()
-        .is_none()
-    {
+    let finished_tag = if !tags.iter().any(|t| t.name == config.finished_tag) {
         requests::create_tag(
             &mut api_client,
             user,
@@ -134,23 +119,18 @@ async fn main() {
             &config.finished_color,
         )
         .await
-        .map_err(|err| {
+        .inspect_err(|err| {
             log::error!("could not create finished tag: {err}");
-            err
         })
-        .map(|tag| {
+        .inspect(|_| {
             log::info!(
                 "created processing tag `{}` to paperless ",
                 config.finished_tag
             );
-            tag
         })
         .ok()
     } else {
-        tags.iter()
-            .filter(|t| t.name == config.finished_tag)
-            .next()
-            .map(|t| t.clone())
+        tags.iter().find(|t| t.name == config.finished_tag).cloned()
     };
 
     if processing_tag.is_none() || finished_tag.is_none() {

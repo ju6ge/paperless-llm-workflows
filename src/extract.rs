@@ -17,7 +17,7 @@ use gbnf::{self, GrammarItem, NonTerminalSymbol, ProductionItem, RepetitionType,
 
 fn gen_gbnf(schema: &schemars::Schema, eos_token: String) -> String {
     let js = &serde_json::to_string(schema.as_value()).unwrap();
-    let mut gram = gbnf::Grammar::from_json_schema(&js)
+    let mut gram = gbnf::Grammar::from_json_schema(js)
         .map_err(|err| {
             println!("{err}");
             err
@@ -27,27 +27,25 @@ fn gen_gbnf(schema: &schemars::Schema, eos_token: String) -> String {
         match &mut r {
             GrammarItem::LineBreak | GrammarItem::Comment(_) => {}
             GrammarItem::Rule(rule) => {
-                if rule.lhs.name == "root".to_string() {
-                    if let Some(last_rule) = rule.rhs.items.last_mut() {
-                        *last_rule = gbnf::ProductionItem::Terminal(
-                            TerminalSymbol {
-                                value: eos_token.clone(),
-                            },
-                            gbnf::RepetitionType::One,
-                        );
-                    }
+                if rule.lhs.name == "root"
+                    && let Some(last_rule) = rule.rhs.items.last_mut()
+                {
+                    *last_rule = gbnf::ProductionItem::Terminal(
+                        TerminalSymbol {
+                            value: eos_token.clone(),
+                        },
+                        gbnf::RepetitionType::One,
+                    );
                 }
             }
         }
     }
     if let Some(p) = gram.recurring_items.get_mut(&NonTerminalSymbol {
         name: "ws".to_string(),
-    }) {
-        if let Some(last_item) = p.items.last_mut() {
-            if let ProductionItem::CharacterSet(_, rep_type) = last_item {
-                *rep_type = RepetitionType::One
-            }
-        }
+    }) && let Some(last_item) = p.items.last_mut()
+        && let ProductionItem::CharacterSet(_, rep_type) = last_item
+    {
+        *rep_type = RepetitionType::One
     }
     gram.to_string()
 }
