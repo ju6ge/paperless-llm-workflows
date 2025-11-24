@@ -372,7 +372,7 @@ pub(crate) struct Decision {
     /// the document
     question: String,
     /// give the model some room to argue in a short string about the correct result
-    answer_reasoning_short_summary: String,
+    answer_reasoning_only_short_explanation: String,
     /// field that will determine the actual result
     pub answer_bool: bool,
 }
