@@ -48,7 +48,7 @@ impl Config {
             finished_color: "#40aebf".to_string(),
             tag_user_name: tag_user.to_string(),
             model: model.to_string(),
-            num_gpu_layers: 0,
+            num_gpu_layers: 1024,
         }
     }
 

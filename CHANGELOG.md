@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- increase default num gpu layers to 1024 for better performance with gpu
+
 ## [0.3.1] - 2025-11-26
 
 ### Added
