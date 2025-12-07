@@ -1,7 +1,7 @@
 ARG INFERENCE_BACKEND="vulkan"
 # using quantized version of qwen3 8b for more resource efficiency
-ARG MODEL_URL="https://huggingface.co/unsloth/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-UD-Q2_K_XL.gguf?download=true"
-ARG MODEL_LICENSE_URL="https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/LICENSE?download=true"
+ARG MODEL_URL="https://huggingface.co/robolamp/Ministral-3-8B-Base-2512-GGUF/resolve/main/Ministral-3-8B-Base-2512-Q2_K.gguf?download=true"
+ARG MODEL_LICENSE_URL="https://www.apache.org/licenses/LICENSE-2.0.txt"
 
 FROM docker.io/rust:latest as builder
 ARG INFERENCE_BACKEND

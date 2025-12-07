@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Changed default model shipped with paperless-llm-workflow to ministral 8b base (smaller model with better results)
+
 ### Fixed
 - increase default num gpu layers to 1024 for better performance with gpu
 - updated llama-cpp bindings to version b7314 2025-12-07
