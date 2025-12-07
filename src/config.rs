@@ -5,6 +5,8 @@ use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Config {
+    pub(crate) host: String,
+    pub(crate) port: u16,
     pub(crate) paperless_server: String,
     pub(crate) processing_tag: String,
     pub(crate) processing_color: String,
@@ -18,6 +20,8 @@ pub(crate) struct Config {
 
 #[derive(Deserialize, Default)]
 pub(crate) struct OverlayConfig {
+    pub(crate) host: Option<String>,
+    pub(crate) port: Option<u16>,
     pub(crate) paperless_server: Option<String>,
     pub(crate) processing_tag: Option<String>,
     pub(crate) processing_color: Option<String>,
@@ -40,6 +44,8 @@ enum OverlayConfigError {
 impl Config {
     pub fn new<S: ToString>(processing_tag: S, finished_tag: S, tag_user: S, model: S) -> Self {
         Self {
+            host: "0.0.0.0".to_string(),
+            port: 8123,
             paperless_server: "https://example-paperless.domain".to_string(),
             processing_tag: processing_tag.to_string(),
             processing_color: "#ffe000".to_string(),
@@ -54,6 +60,8 @@ impl Config {
 
     pub fn overlay_config(self, overlay_config: OverlayConfig) -> Self {
         Self {
+            host: overlay_config.host.unwrap_or(self.host),
+            port: overlay_config.port.unwrap_or(self.port),
             paperless_server: overlay_config
                 .paperless_server
                 .unwrap_or(self.paperless_server),
@@ -94,6 +102,10 @@ impl OverlayConfig {
 
     pub(crate) fn read_from_env() -> OverlayConfig {
         OverlayConfig {
+            host: std::env::var("PAPERLESS_WEBHOOK_HOST").ok(),
+            port: std::env::var("PAPERLESS_WEBHOOK_PORT")
+                .ok()
+                .and_then(|num| num.parse().ok()),
             paperless_server: std::env::var("PAPERLESS_SERVER").ok(),
             processing_tag: std::env::var("PROCESSING_TAG_NAME").ok(),
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
