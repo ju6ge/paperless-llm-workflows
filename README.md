@@ -16,8 +16,8 @@ If you are looking for document chat or don't care and are fine sending all your
 ## Under the Hood
 
 Under the hood this software is running `llama.cpp` as an inference engine to provide a local language model without depending on any cloud providers. Depending on the selected feature it is possible to run
-with `cuda`, `vulkan`, `openmp` or `native` acceleration.
-As a base model this software is using a quantized version of `Qwen3` to reduce the resource requirements and enable running this even with limited resources.
+with `cuda`, `vulkan` or `openmp` acceleration.
+As a base model this software is using a quantized version of `Ministral 3` to reduce the resource requirements and enable running this even with limited resources.
 
 Long term I want expand the features to enable fine tuning models to your document corpus. This is where the actual learning would come in.
 
@@ -56,12 +56,19 @@ Apart from configuration an API Token is required to enable communication with t
 
 This file shows the default configuration and explains the options:
 ``` toml
+# corresponding env var `PAPERLESS_WEBHOOK_HOST` listen address of service
+host = "0.0.0.0"
+# corresponding env var `PAPERLESS_WEBHOOK_PORT` listen port of service
+port = 8123
 # corresponding env var `PAPERLESS_SERVER`, defines were the paperless instnace is reachable
 paperless_server = "https://example-paperless.domain"
 # corresponding env var `GGUF_MODEL_PATH`, defines where the gguf model file is located
 model = "/usr/share/paperless-field-extractor/model.gguf"
-# corresponding env var `NUM_GPU_LAYERS`, sets llama cpp option num_cpu_layers when initializing the inference backend zero here means unlimited
-num_gpu_layers = 0
+# corresponding env var `NUM_GPU_LAYERS`, sets llama cpp option num_cpu_layers when initializing the inference backend zero here means unlimited, most models have way less layers ~50 so this should suffice for full offloading to gpu
+num_gpu_layers = 1024
+# corresponding env var `PAPERLESS_LLM_MAX_CTX`, sets maximum token size for an inference session if, default value of 0 means that the maximum context used while training of the model will be used. This is potentially very big so it is recommended to use
+a lower value. It needs to be big enouth to fit the biggest doc from your paperless instance.
+max_ctx = 0
 
 # correspondent suggesting enables the language model to process all inbox documents and add extra suggestions to the correspondet value, this is useful if you have a lot of new document that paperless has not trained for matching yet
 # the corresponding environment var is `CORRESPONDENT_SUGGEST`
@@ -92,6 +99,7 @@ The default container is setup to include a model already and with some environm
     --device /dev/kfd \ # give graphics device access to the container
     --device /dev/dri \ # give graphics device access to the container
     -p 8123:8123
+    -e PAPERLESS_LLM_MAX_CTX=16384 \ # maximum context length of an inference session, needs to be big enought for document + llm output
     -e PAPERLESS_API_CLIENT_API_TOKEN=<token> \
     -e PAPERLESS_SERVER=<paperless_ngx_url> \
     -e PAPERLESS_USER=<user> \ # used for tag creation
