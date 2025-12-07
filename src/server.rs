@@ -857,10 +857,11 @@ pub async fn run_server(
         paperless_api_client.clone(),
         rx_update,
     ));
+    let server_config = config.clone();
     let webhook_server = HttpServer::new(move || {
         App::new()
             .app_data(Data::new(tx.clone()))
-            .app_data(Data::new(config.clone()))
+            .app_data(Data::new(server_config.clone()))
             .app_data(Data::new(paperless_api_client.clone()))
             .app_data(Data::new(status_tags.clone()))
             .service(
@@ -870,7 +871,7 @@ pub async fn run_server(
             )
             .service(DocumentProcessingApi)
     })
-    .bind(("0.0.0.0", 8123))?
+    .bind((config.host, config.port))?
     .run();
 
     let _ = join!(
