@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - increase default num gpu layers to 1024 for better performance with gpu
+- updated llama-cpp bindings to version b7314 2025-12-07
 
 ## [0.3.1] - 2025-11-26
 

@@ -36,6 +36,5 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
 
 [features]
 vulkan = [ "llama-cpp-2/vulkan" ]
-native = [ "llama-cpp-2/native" ]
 openmp = [ "llama-cpp-2/openmp" ]
 cuda = [ "llama-cpp-2/cuda" ]

@@ -13,25 +13,21 @@ mod server;
 mod types;
 
 #[cfg(any(
-    all(feature = "vulkan", feature = "native"),
     all(feature = "vulkan", feature = "openmp"),
     all(feature = "vulkan", feature = "cuda"),
     all(feature = "openmp", feature = "cuda"),
-    all(feature = "openmp", feature = "native"),
-    all(feature = "cuda", feature = "native")
 ))]
 compile_error!(
-    "Only one compute backend can be used, choose feature `vulkan`, `openmp`, `cuda` or `native`!"
+    "Only one compute backend can be used, choose feature `vulkan`, `openmp`, or `cuda`!"
 );
 
 #[cfg(not(any(
     feature = "vulkan",
-    feature = "native",
     feature = "openmp",
     feature = "cuda"
 )))]
 compile_error!(
-    "Choose feature `vulkan`, `openmp`, `cuda` or `native` to select what compute backend should be used for inference!"
+    "Choose feature `vulkan`, `openmp`, or `cuda` to select what compute backend should be used for inference!"
 );
 
 #[derive(Parser, Debug)]

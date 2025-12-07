@@ -1,4 +1,4 @@
-use llama_cpp_2::LLamaCppError;
+use llama_cpp_2::LlamaCppError;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -57,7 +57,7 @@ pub(crate) enum ModelError {
     #[error("Model has not been loaded!")]
     ModelNotLoaded,
     #[error(transparent)]
-    LlamaCppError(#[from] LLamaCppError),
+    LlamaCppError(#[from] LlamaCppError),
 }
 
 pub(crate) struct LLModelExtractor {
@@ -110,6 +110,7 @@ impl LLModelExtractor {
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
             LlamaSampler::dry(&self.model, 5., 1.75, 2, 1024, ["\n", ":", "\"", "*"]),
+            LlamaSampler::temp(0.5),
             LlamaSampler::greedy(),
         ]);
         let prompt = format!("{}\n", serde_json::to_string(base_data).unwrap());
