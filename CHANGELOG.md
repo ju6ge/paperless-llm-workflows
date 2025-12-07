@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Configuration option to set llm maximum context window
+
 ### Changed
 - Changed default model shipped with paperless-llm-workflow to ministral 8b base (smaller model with better results)
 

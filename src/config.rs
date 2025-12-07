@@ -16,6 +16,7 @@ pub(crate) struct Config {
     pub(crate) tag_user_name: String,
     pub(crate) model: String,
     pub(crate) num_gpu_layers: usize,
+    pub(crate) max_ctx: usize,
 }
 
 #[derive(Deserialize, Default)]
@@ -31,6 +32,7 @@ pub(crate) struct OverlayConfig {
     pub(crate) tag_user_name: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) num_gpu_layers: Option<usize>,
+    pub(crate) max_ctx: Option<usize>,
 }
 
 #[derive(Debug, Error)]
@@ -55,6 +57,7 @@ impl Config {
             tag_user_name: tag_user.to_string(),
             model: model.to_string(),
             num_gpu_layers: 1024,
+            max_ctx: 0, // 0 will mean that per default max ctx train of the model will be used, this is potentially way to large
         }
     }
 
@@ -77,6 +80,7 @@ impl Config {
             tag_user_name: overlay_config.tag_user_name.unwrap_or(self.tag_user_name),
             model: overlay_config.model.unwrap_or(self.model),
             num_gpu_layers: overlay_config.num_gpu_layers.unwrap_or(self.num_gpu_layers),
+            max_ctx: overlay_config.max_ctx.unwrap_or(self.max_ctx),
         }
     }
 }
@@ -117,6 +121,9 @@ impl OverlayConfig {
             tag_user_name: std::env::var("PAPERLESS_USER").ok(),
             model: std::env::var("GGUF_MODEL_PATH").ok(),
             num_gpu_layers: std::env::var("NUM_GPU_LAYERS")
+                .ok()
+                .and_then(|num| num.parse().ok()),
+            max_ctx: std::env::var("PAPERLESS_LLM_MAX_CTX")
                 .ok()
                 .and_then(|num| num.parse().ok()),
         }
