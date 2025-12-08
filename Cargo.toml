@@ -1,6 +1,6 @@
 [package]
 name = "paperless-llm-workflows"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 author = "ju6ge <judge@felixrichter.tech>"
 license = "AGPL-3.0"
