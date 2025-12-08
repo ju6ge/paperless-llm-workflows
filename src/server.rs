@@ -723,9 +723,17 @@ async fn document_processor(
             {
                 let mut model_singleton = MODEL_SINGLETON.lock().await;
                 if model_singleton.is_none() {
-                    let max_ctx = if config.max_ctx == 0 { None } else { Some(config.max_ctx as u32) };
+                    let max_ctx = if config.max_ctx == 0 {
+                        None
+                    } else {
+                        Some(config.max_ctx as u32)
+                    };
                     *model_singleton = spawn_blocking(move || {
-                        LLModelExtractor::new(Path::new(&model_path), config.num_gpu_layers, max_ctx)
+                        LLModelExtractor::new(
+                            Path::new(&model_path),
+                            config.num_gpu_layers,
+                            max_ctx,
+                        )
                     })
                     .await
                     .map_err(|err| {

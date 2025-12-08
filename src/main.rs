@@ -21,11 +21,7 @@ compile_error!(
     "Only one compute backend can be used, choose feature `vulkan`, `openmp`, or `cuda`!"
 );
 
-#[cfg(not(any(
-    feature = "vulkan",
-    feature = "openmp",
-    feature = "cuda"
-)))]
+#[cfg(not(any(feature = "vulkan", feature = "openmp", feature = "cuda")))]
 compile_error!(
     "Choose feature `vulkan`, `openmp`, or `cuda` to select what compute backend should be used for inference!"
 );
