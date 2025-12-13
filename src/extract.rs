@@ -109,9 +109,10 @@ impl LLModelExtractor {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
-            LlamaSampler::dry(&self.model, 5., 1.75, 2, 1024, ["\n", ":", "\"", "*"]),
-            LlamaSampler::temp(0.5),
-            LlamaSampler::greedy(),
+            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"], ),
+            LlamaSampler::min_p(0.01, 64),
+            LlamaSampler::temp(0.1),
+            LlamaSampler::dist(rand::random()),
         ]);
         let prompt = format!("{}\n", serde_json::to_string(base_data).unwrap());
         let mut ctx = self
