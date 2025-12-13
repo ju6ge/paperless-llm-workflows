@@ -16,7 +16,10 @@ use crate::{
     config::Config,
     extract::{LLModelExtractor, ModelError},
     requests,
-    types::{FieldError, FieldExtract, custom_field_learning_supported, schema_from_custom_field},
+    types::{
+        Decision, FieldError, FieldExtract, custom_field_learning_supported,
+        schema_from_custom_field, schema_from_decision_question,
+    },
 };
 
 #[derive(Debug, clap::Args)]
@@ -34,6 +37,8 @@ pub(crate) struct BenchmarkParameters {
 pub(crate) enum BenchmarkResultType {
     CustomFieldExtraction,
     CorrespondentSuggest,
+    DecideValidCorrespondent,
+    DecideInvalidCorrespondent,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -222,6 +227,118 @@ fn run_correspondent_suggest_benchmark(
     }
 }
 
+/// this benchmark is used to evaluate true false questions based on the document
+/// when adding new questions tests should always add tests for the positive and
+/// the negative answer. Only questions where the validity can be checked based
+/// on the document metadata programmatically may be used. This means only data that
+/// is availible for every document, because otherwise this benchmark might become
+/// very depenendent on the paperless instances configuration
+fn run_decision_benchmarks(
+    model: &mut LLModelExtractor,
+    doc: &Document,
+    crrspndnts: &Vec<Correspondent>,
+    results: &mut BenchmarkResults,
+) {
+    let doc_data = serde_json::to_value(&doc.content).unwrap();
+
+    // simple question is the correspondent correct, only if doc has correspondent!
+    if let Some(expected_correspondent) = doc
+        .correspondent
+        .map(|dcr| crrspndnts.iter().find(|c| c.id == dcr))
+        .flatten()
+    {
+        let expected_yes_question = format!(
+            "Is '{}' the author/sender of this document?",
+            expected_correspondent.name
+        );
+        let question_schema = schema_from_decision_question(&expected_yes_question);
+        match model.extract(&doc_data, &question_schema, false) {
+            Ok(model_answer_value) => {
+                let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
+                    .expect("grammar constrains output to match type");
+                if model_decision.answer_bool {
+                    results.0.push(SingleResult {
+                        benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
+                        doc_id: doc.id,
+                        expected_result: Value::Bool(true),
+                        benchmark_result: model_answer_value,
+                        success: true,
+                        error: None,
+                    });
+                } else {
+                    results.0.push(SingleResult {
+                        benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
+                        doc_id: doc.id,
+                        expected_result: Value::Bool(true),
+                        benchmark_result: model_answer_value,
+                        success: false,
+                        error: None,
+                    });
+                }
+            }
+            Err(model_err) => {
+                results.0.push(SingleResult {
+                    benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
+                    doc_id: doc.id,
+                    expected_result: Value::Bool(true),
+                    benchmark_result: Value::Null,
+                    success: false,
+                    error: Some(model_err.to_string()),
+                });
+            }
+        }
+
+        // only if there is only one possible correspondent, then this case will not run, because there is no false correspondent to select from …
+        if let Some(random_incorrect_correspondent) = crrspndnts
+            .iter()
+            .filter(|c| c.id != expected_correspondent.id)
+            .choose(&mut rng())
+        {
+            let expected_no_question = format!(
+                "Is '{}' the author/sender of this document?",
+                random_incorrect_correspondent
+            );
+            let question_schema = schema_from_decision_question(&expected_no_question);
+            match model.extract(&doc_data, &question_schema, false) {
+                Ok(model_answer_value) => {
+                    let model_decision: Decision =
+                        serde_json::from_value(model_answer_value.clone())
+                            .expect("grammar constrains output to match type");
+                    if !model_decision.answer_bool {
+                        results.0.push(SingleResult {
+                            benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
+                            doc_id: doc.id,
+                            expected_result: Value::Bool(false),
+                            benchmark_result: model_answer_value,
+                            success: true,
+                            error: None,
+                        });
+                    } else {
+                        results.0.push(SingleResult {
+                            benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
+                            doc_id: doc.id,
+                            expected_result: Value::Bool(false),
+                            benchmark_result: model_answer_value,
+                            success: false,
+                            error: None,
+                        });
+                    }
+                }
+                Err(model_err) => {
+                    results.0.push(SingleResult {
+                        benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
+                        doc_id: doc.id,
+                        expected_result: Value::Bool(false),
+                        benchmark_result: Value::Null,
+                        success: false,
+                        error: Some(model_err.to_string()),
+                    });
+                }
+            }
+        }
+    }
+}
+
 impl BenchmarkParameters {
     pub async fn run(&self, config: Config) {
         let mut api_client = Client::new_from_env();
@@ -271,7 +388,13 @@ impl BenchmarkParameters {
         for doc in &doc_to_process {
             // this function is the only task running, so we do not care that the benchmark functions may block for a long time
             run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
-            run_correspondent_suggest_benchmark(&mut model, doc, &crrspndents, &mut benchmark_results);
+            run_correspondent_suggest_benchmark(
+                &mut model,
+                doc,
+                &crrspndents,
+                &mut benchmark_results,
+            );
+            run_decision_benchmarks(&mut model, doc, &crrspndents, &mut benchmark_results);
         }
 
         //write results to disc
@@ -282,5 +405,7 @@ impl BenchmarkParameters {
             "{}",
             serde_json::to_string(&benchmark_results).unwrap()
         );
+
+
     }
 }
