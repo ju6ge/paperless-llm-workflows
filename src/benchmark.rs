@@ -6,7 +6,7 @@ use std::{fs::File, io::Write, path::Path};
 use itertools::Itertools;
 use paperless_api_client::{
     Client, custom_fields,
-    types::{CustomField, Document},
+    types::{Correspondent, CustomField, Document},
 };
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,14 @@ pub(crate) struct BenchmarkParameters {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum BenchmarkResultType {
+    CustomFieldExtraction,
+    CorrespondentSuggest,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SingleResult {
+    benchmark_type: BenchmarkResultType,
     doc_id: i64,
     expected_result: Value,
     benchmark_result: Value,
@@ -40,15 +47,11 @@ pub(crate) struct SingleResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BenchmarkResults {
-    custom_field_predictions: Vec<SingleResult>,
-}
+pub(crate) struct BenchmarkResults(Vec<SingleResult>);
 
 impl BenchmarkResults {
     pub fn init_empty() -> Self {
-        Self {
-            custom_field_predictions: Vec::new(),
-        }
+        Self(Vec::new())
     }
 }
 
@@ -90,48 +93,132 @@ fn run_custom_field_benchmark(
                                 if extracted_cfi == *doc_cf.1 {
                                     // the extracted value corresponds exactly to the value of the validated documen
                                     // so this is the only case that is considered a success
-                                    results.custom_field_predictions.push(SingleResult {
+                                    results.0.push(SingleResult {
+                                        benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
                                         success: true,
-                                        error: None
+                                        error: None,
                                     });
                                 } else {
-                                    results.custom_field_predictions.push(SingleResult {
+                                    results.0.push(SingleResult {
+                                        benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
                                         success: false,
-                                        error: None
+                                        error: None,
                                     });
                                 }
                             }
                             Err(err) => {
-                                results.custom_field_predictions.push(SingleResult {
+                                results.0.push(SingleResult {
+                                    benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                     doc_id: valid_doc_state.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                                     success: false,
-                                    error: Some(err.to_string())
+                                    error: Some(err.to_string()),
                                 });
                             }
                         }
                     }
                     Err(model_err) => {
-                        results.custom_field_predictions.push(SingleResult {
+                        results.0.push(SingleResult {
+                            benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                             doc_id: valid_doc_state.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                             benchmark_result: Value::Null,
                             success: false,
-                            error: Some(model_err.to_string())
+                            error: Some(model_err.to_string()),
                         });
                     }
                 }
             }
         }
+    }
+}
+
+fn run_correspondent_suggest_benchmark(
+    model: &mut LLModelExtractor,
+    doc: &Document,
+    crrspndnts: &Vec<Correspondent>,
+    results: &mut BenchmarkResults,
+) {
+    let crrspndts_suggest_schema = crate::types::schema_from_correspondents(&crrspndnts.as_slice());
+    let doc_data = serde_json::to_value(&doc.content).unwrap();
+
+    if let Some(expected_correspondent) = doc
+        .correspondent
+        .map(|dcr| crrspndnts.iter().find(|c| c.id == dcr))
+        .flatten()
+    {
+        match model.extract(&doc_data, &crrspndts_suggest_schema, false) {
+            Ok(model_result_value) => {
+                let field_extract: FieldExtract = serde_json::from_value(model_result_value)
+                    .expect("grammar enforces output matches type");
+                match field_extract.to_correspondent(&crrspndnts.as_slice()) {
+                    Ok(suggested_crrspndnt) => {
+                        if suggested_crrspndnt.id == expected_correspondent.id {
+                            results.0.push(SingleResult {
+                                benchmark_type: BenchmarkResultType::CorrespondentSuggest,
+                                doc_id: doc.id,
+                                expected_result: serde_json::to_value(
+                                    expected_correspondent.name.clone(),
+                                )
+                                .unwrap(),
+                                benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
+                                    .unwrap(),
+                                success: true,
+                                error: None,
+                            });
+                        } else {
+                            results.0.push(SingleResult {
+                                benchmark_type: BenchmarkResultType::CorrespondentSuggest,
+                                doc_id: doc.id,
+                                expected_result: serde_json::to_value(
+                                    expected_correspondent.name.clone(),
+                                )
+                                .unwrap(),
+                                benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
+                                    .unwrap(),
+                                success: false,
+                                error: None,
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        results.0.push(SingleResult {
+                            benchmark_type: BenchmarkResultType::CorrespondentSuggest,
+                            doc_id: doc.id,
+                            expected_result: serde_json::to_value(
+                                expected_correspondent.name.clone(),
+                            )
+                            .unwrap(),
+                            benchmark_result: serde_json::to_value(&field_extract).unwrap(),
+                            success: false,
+                            error: Some(err.to_string()),
+                        });
+                    }
+                }
+            }
+            Err(model_error) => {
+                results.0.push(SingleResult {
+                    benchmark_type: BenchmarkResultType::CorrespondentSuggest,
+                    doc_id: doc.id,
+                    expected_result: serde_json::to_value(expected_correspondent.name.clone())
+                        .unwrap(),
+                    benchmark_result: Value::Null,
+                    success: false,
+                    error: Some(model_error.to_string()),
+                });
+            }
+        }
+    } else {
+        // for now documents without a correspondent are simply ignored
     }
 }
 
@@ -142,6 +229,7 @@ impl BenchmarkParameters {
 
         let tags = requests::get_all_tags(&mut api_client).await;
         let custom_fields = requests::get_all_custom_fields(&mut api_client).await;
+        let crrspndents = requests::fetch_all_correspondents(&mut api_client).await;
         let mut doc_to_process = requests::get_all_docs(&mut api_client)
             .await
             .into_iter()
@@ -183,10 +271,16 @@ impl BenchmarkParameters {
         for doc in &doc_to_process {
             // this function is the only task running, so we do not care that the benchmark functions may block for a long time
             run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
+            run_correspondent_suggest_benchmark(&mut model, doc, &crrspndents, &mut benchmark_results);
         }
 
         //write results to disc
-        let mut result_file = File::create("/tmp/paperless-llm-workflow-model-benchmark.json").unwrap();
-        let _ = write!(&mut result_file, "{}", serde_json::to_string(&benchmark_results).unwrap());
+        let mut result_file =
+            File::create("/tmp/paperless-llm-workflow-model-benchmark.json").unwrap();
+        let _ = write!(
+            &mut result_file,
+            "{}",
+            serde_json::to_string(&benchmark_results).unwrap()
+        );
     }
 }
