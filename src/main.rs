@@ -1,11 +1,13 @@
 use std::{path::Path, process::exit};
 
+use benchmark::BenchmarkParameters;
 use clap::Parser;
 use config::{Config, OverlayConfig};
 use paperless_api_client::Client;
 use server::run_server;
 use utoipa::OpenApi;
 
+mod benchmark;
 mod config;
 mod extract;
 mod requests;
@@ -29,8 +31,15 @@ compile_error!(
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, default_value_t = false, action)]
-    gen_api_spec: bool,
+    #[clap(subcommand)]
+    action: Action,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Action {
+    GenApiSpec,
+    Server,
+    Benchmark(BenchmarkParameters),
 }
 
 #[tokio::main]
@@ -38,19 +47,28 @@ async fn main() {
     let args = Args::parse();
     colog::init();
 
-    if args.gen_api_spec {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&server::DocumentProcessingApiSpec::openapi()).unwrap()
-        );
-        exit(0);
-    }
-
     let config = Config::default()
         .overlay_config(OverlayConfig::read_config_toml(Path::new(
             "/etc/paperless-field-extractor/config.toml",
         )))
         .overlay_config(OverlayConfig::read_from_env());
+
+
+    match args.action {
+        Action::GenApiSpec => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&server::DocumentProcessingApiSpec::openapi())
+                    .unwrap()
+            );
+            exit(0);
+        }
+        Action::Benchmark(benchmark_parameters) => {
+            benchmark_parameters.run(config).await;
+            exit(0);
+        }
+        Action::Server => { /* keep going other option stop execution after completion */ }
+    }
 
     let _model_path = Path::new(&config.model)
         .canonicalize()
