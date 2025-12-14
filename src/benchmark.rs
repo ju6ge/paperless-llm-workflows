@@ -3,6 +3,7 @@
 
 use std::{fs::File, io::Write, path::Path};
 
+use indicatif::ProgressBar;
 use itertools::Itertools;
 use paperless_api_client::{
     Client, custom_fields,
@@ -11,6 +12,8 @@ use paperless_api_client::{
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum::VariantArray;
+use tabled::{builder::Builder, settings::Style, Table, Tabled};
 
 use crate::{
     config::Config,
@@ -33,7 +36,7 @@ pub(crate) struct BenchmarkParameters {
     sample_doc_size: Option<usize>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, strum::Display, strum::VariantArray, PartialEq, Eq, Clone)]
 pub(crate) enum BenchmarkResultType {
     CustomFieldExtraction,
     CorrespondentSuggest,
@@ -51,12 +54,33 @@ pub(crate) struct SingleResult {
     error: Option<String>,
 }
 
+#[derive(Tabled)]
+pub(crate) struct BenchmarkKindSummary {
+    benchmak_type: BenchmarkResultType,
+    success: usize,
+    failed: usize,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BenchmarkResults(Vec<SingleResult>);
 
 impl BenchmarkResults {
     pub fn init_empty() -> Self {
         Self(Vec::new())
+    }
+
+    pub fn display_results(&self) {
+        let mut table_rows = Vec::new();
+        for benchmark_kind in BenchmarkResultType::VARIANTS {
+            let succeded = self.0.iter().filter(|r| r.benchmark_type == *benchmark_kind).filter(|r| r.success).count();
+            let failed = self.0.iter().filter(|r| r.benchmark_type == *benchmark_kind).filter(|r| !r.success).count();
+            table_rows.push(BenchmarkKindSummary {
+                benchmak_type: benchmark_kind.clone(),
+                success: succeded,
+                failed
+            });
+        }
+        println!("{}", Table::new(table_rows).with(Style::ascii()));
     }
 }
 
@@ -296,7 +320,7 @@ fn run_decision_benchmarks(
         {
             let expected_no_question = format!(
                 "Is '{}' the author/sender of this document?",
-                random_incorrect_correspondent
+                random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
             match model.extract(&doc_data, &question_schema, false) {
@@ -385,7 +409,9 @@ impl BenchmarkParameters {
             LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
                 .expect("Language model is required to load for benchmarking its performance");
 
+        let pb = ProgressBar::new(doc_to_process.len() as u64);
         for doc in &doc_to_process {
+            pb.set_message(format!("Performing Model benchmarks for document with id {}", doc.id));
             // this function is the only task running, so we do not care that the benchmark functions may block for a long time
             run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
             run_correspondent_suggest_benchmark(
@@ -395,7 +421,9 @@ impl BenchmarkParameters {
                 &mut benchmark_results,
             );
             run_decision_benchmarks(&mut model, doc, &crrspndents, &mut benchmark_results);
+            pb.inc(1);
         }
+        pb.finish_with_message("All Documents processed, displaying model performance results!");
 
         //write results to disc
         let mut result_file =
@@ -406,6 +434,6 @@ impl BenchmarkParameters {
             serde_json::to_string(&benchmark_results).unwrap()
         );
 
-
+        benchmark_results.display_results();
     }
 }
