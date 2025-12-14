@@ -34,6 +34,9 @@ pub(crate) struct BenchmarkParameters {
     #[clap(long)]
     /// amount of documents to select from corpus, if unspecified all docs will be used!
     sample_doc_size: Option<usize>,
+
+    #[clap(long)]
+    result_file: Option<String>
 }
 
 #[derive(Debug, Serialize, Deserialize, strum::Display, strum::VariantArray, PartialEq, Eq, Clone)]
@@ -426,13 +429,15 @@ impl BenchmarkParameters {
         pb.finish_with_message("All Documents processed, displaying model performance results!");
 
         //write results to disc
-        let mut result_file =
-            File::create("/tmp/paperless-llm-workflow-model-benchmark.json").unwrap();
-        let _ = write!(
-            &mut result_file,
-            "{}",
-            serde_json::to_string(&benchmark_results).unwrap()
-        );
+        if let Some(result_file_path) = &self.result_file {
+            let mut result_file =
+                File::create(result_file_path).unwrap();
+            let _ = write!(
+                &mut result_file,
+                "{}",
+                serde_json::to_string(&benchmark_results).unwrap()
+            );
+        }
 
         benchmark_results.display_results();
     }
