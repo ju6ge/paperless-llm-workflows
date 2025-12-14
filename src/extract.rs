@@ -125,19 +125,25 @@ impl LLModelExtractor {
             .unwrap_or_else(|_| panic!("failed to tokenize {prompt}"));
         let n_len = tokens_list.len() + 4096;
 
+        let batch_chunk_size: usize = 512;
         // create a llama_batch with size 512
         // we use this object to submit token data for decoding
-        let mut batch = LlamaBatch::new(n_len, 1);
+        let mut batch = LlamaBatch::new(batch_chunk_size, 1);
 
         let last_index = tokens_list.len() as i32 - 1;
-        for (i, token) in (0_i32..).zip(tokens_list.clone().into_iter()) {
-            // llama_decode will output logits only for the last token of the prompt
-            let is_last = i == last_index;
-            batch.add(token, i, &[0], is_last).unwrap();
+        for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
+            batch.clear();
+            for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
+                // llama_decode will output logits only for the last token of the prompt
+                let is_last = (batch_i*batch_chunk_size + i) == last_index as usize;
+                batch.add(*token, (batch_i*batch_chunk_size + i) as i32, &[0], is_last).unwrap();
+            }
+            ctx.decode(&mut batch).expect("llama_decode() failed");
         }
-        ctx.decode(&mut batch).expect("llama_decode() failed");
+        batch.clear();
+
         let mut decoder = encoding_rs::UTF_8.new_decoder();
-        let mut n_cur = batch.n_tokens();
+        let mut n_cur = tokens_list.len() as i32;
         let mut output = String::new();
         while n_cur as usize <= n_len {
             // sample the next token
