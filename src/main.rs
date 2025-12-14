@@ -45,7 +45,7 @@ enum Action {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    colog::init();
+    //colog::init();
 
     let config = Config::default()
         .overlay_config(OverlayConfig::read_config_toml(Path::new(
