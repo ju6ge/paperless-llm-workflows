@@ -1,7 +1,11 @@
 //! Module implementing some benchmarks, to evaluate how good of a job a certain model
 //! will do based on already verified documents in paperless
 
-use std::{fs::{File, OpenOptions}, io::Write, path::Path};
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+    path::Path,
+};
 
 use indicatif::ProgressBar;
 use itertools::Itertools;
@@ -39,7 +43,7 @@ pub(crate) struct BenchmarkParameters {
     result_file: Option<String>,
 
     #[clap(long, default_value = "false", action)]
-    view: bool
+    view: bool,
 }
 
 #[derive(
@@ -67,6 +71,7 @@ pub(crate) struct BenchmarkKindSummary {
     benchmak_type: BenchmarkResultType,
     success: usize,
     failed: usize,
+    errored: usize
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -90,18 +95,27 @@ impl BenchmarkResults {
                 .results
                 .iter()
                 .filter(|r| r.benchmark_type == *benchmark_kind)
+                .filter(|r| r.error.is_none())
                 .filter(|r| r.success)
                 .count();
             let failed = self
                 .results
                 .iter()
                 .filter(|r| r.benchmark_type == *benchmark_kind)
+                .filter(|r| r.error.is_none())
                 .filter(|r| !r.success)
+                .count();
+            let errored= self
+                .results
+                .iter()
+                .filter(|r| r.benchmark_type == *benchmark_kind)
+                .filter(|r| r.error.is_some())
                 .count();
             table_rows.push(BenchmarkKindSummary {
                 benchmak_type: benchmark_kind.clone(),
                 success: succeded,
                 failed,
+                errored
             });
         }
         println!("{}", Table::new(table_rows).with(Style::ascii()));
@@ -391,8 +405,12 @@ impl BenchmarkParameters {
     pub async fn run(&self, config: Config) {
         if self.view {
             if let Some(result_file_path) = &self.result_file {
-                let rfile = OpenOptions::new().read(true).open(result_file_path).unwrap();
-                let benchmark_results: BenchmarkResults = serde_json::from_reader(rfile).expect("Invalid benchmark result file!");
+                let rfile = OpenOptions::new()
+                    .read(true)
+                    .open(result_file_path)
+                    .unwrap();
+                let benchmark_results: BenchmarkResults =
+                    serde_json::from_reader(rfile).expect("Invalid benchmark result file!");
                 benchmark_results.display_results();
             } else {
                 println!("No result file path set no result to view! … Exiting")
