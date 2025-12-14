@@ -13,7 +13,7 @@ use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantArray;
-use tabled::{builder::Builder, settings::Style, Table, Tabled};
+use tabled::{Table, Tabled, builder::Builder, settings::Style};
 
 use crate::{
     config::Config,
@@ -36,10 +36,12 @@ pub(crate) struct BenchmarkParameters {
     sample_doc_size: Option<usize>,
 
     #[clap(long)]
-    result_file: Option<String>
+    result_file: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, strum::Display, strum::VariantArray, PartialEq, Eq, Clone)]
+#[derive(
+    Debug, Serialize, Deserialize, strum::Display, strum::VariantArray, PartialEq, Eq, Clone,
+)]
 pub(crate) enum BenchmarkResultType {
     CustomFieldExtraction,
     CorrespondentSuggest,
@@ -65,22 +67,38 @@ pub(crate) struct BenchmarkKindSummary {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct BenchmarkResults(Vec<SingleResult>);
+pub(crate) struct BenchmarkResults {
+    model: String,
+    results: Vec<SingleResult>,
+}
 
 impl BenchmarkResults {
-    pub fn init_empty() -> Self {
-        Self(Vec::new())
+    pub fn init_empty<S: ToString>(model_name: S) -> Self {
+        Self {
+            model: model_name.to_string(),
+            results: Vec::new(),
+        }
     }
 
     pub fn display_results(&self) {
         let mut table_rows = Vec::new();
         for benchmark_kind in BenchmarkResultType::VARIANTS {
-            let succeded = self.0.iter().filter(|r| r.benchmark_type == *benchmark_kind).filter(|r| r.success).count();
-            let failed = self.0.iter().filter(|r| r.benchmark_type == *benchmark_kind).filter(|r| !r.success).count();
+            let succeded = self
+                .results
+                .iter()
+                .filter(|r| r.benchmark_type == *benchmark_kind)
+                .filter(|r| r.success)
+                .count();
+            let failed = self
+                .results
+                .iter()
+                .filter(|r| r.benchmark_type == *benchmark_kind)
+                .filter(|r| !r.success)
+                .count();
             table_rows.push(BenchmarkKindSummary {
                 benchmak_type: benchmark_kind.clone(),
                 success: succeded,
-                failed
+                failed,
             });
         }
         println!("{}", Table::new(table_rows).with(Style::ascii()));
@@ -125,7 +143,7 @@ fn run_custom_field_benchmark(
                                 if extracted_cfi == *doc_cf.1 {
                                     // the extracted value corresponds exactly to the value of the validated documen
                                     // so this is the only case that is considered a success
-                                    results.0.push(SingleResult {
+                                    results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -135,7 +153,7 @@ fn run_custom_field_benchmark(
                                         error: None,
                                     });
                                 } else {
-                                    results.0.push(SingleResult {
+                                    results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -147,7 +165,7 @@ fn run_custom_field_benchmark(
                                 }
                             }
                             Err(err) => {
-                                results.0.push(SingleResult {
+                                results.results.push(SingleResult {
                                     benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                     doc_id: valid_doc_state.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -159,7 +177,7 @@ fn run_custom_field_benchmark(
                         }
                     }
                     Err(model_err) => {
-                        results.0.push(SingleResult {
+                        results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                             doc_id: valid_doc_state.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -195,7 +213,7 @@ fn run_correspondent_suggest_benchmark(
                 match field_extract.to_correspondent(&crrspndnts.as_slice()) {
                     Ok(suggested_crrspndnt) => {
                         if suggested_crrspndnt.id == expected_correspondent.id {
-                            results.0.push(SingleResult {
+                            results.results.push(SingleResult {
                                 benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                                 doc_id: doc.id,
                                 expected_result: serde_json::to_value(
@@ -208,7 +226,7 @@ fn run_correspondent_suggest_benchmark(
                                 error: None,
                             });
                         } else {
-                            results.0.push(SingleResult {
+                            results.results.push(SingleResult {
                                 benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                                 doc_id: doc.id,
                                 expected_result: serde_json::to_value(
@@ -223,7 +241,7 @@ fn run_correspondent_suggest_benchmark(
                         }
                     }
                     Err(err) => {
-                        results.0.push(SingleResult {
+                        results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                             doc_id: doc.id,
                             expected_result: serde_json::to_value(
@@ -238,7 +256,7 @@ fn run_correspondent_suggest_benchmark(
                 }
             }
             Err(model_error) => {
-                results.0.push(SingleResult {
+                results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                     doc_id: doc.id,
                     expected_result: serde_json::to_value(expected_correspondent.name.clone())
@@ -284,7 +302,7 @@ fn run_decision_benchmarks(
                 let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
                     .expect("grammar constrains output to match type");
                 if model_decision.answer_bool {
-                    results.0.push(SingleResult {
+                    results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
                         doc_id: doc.id,
                         expected_result: Value::Bool(true),
@@ -293,7 +311,7 @@ fn run_decision_benchmarks(
                         error: None,
                     });
                 } else {
-                    results.0.push(SingleResult {
+                    results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
                         doc_id: doc.id,
                         expected_result: Value::Bool(true),
@@ -304,7 +322,7 @@ fn run_decision_benchmarks(
                 }
             }
             Err(model_err) => {
-                results.0.push(SingleResult {
+                results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
                     doc_id: doc.id,
                     expected_result: Value::Bool(true),
@@ -332,7 +350,7 @@ fn run_decision_benchmarks(
                         serde_json::from_value(model_answer_value.clone())
                             .expect("grammar constrains output to match type");
                     if !model_decision.answer_bool {
-                        results.0.push(SingleResult {
+                        results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
                             doc_id: doc.id,
                             expected_result: Value::Bool(false),
@@ -341,7 +359,7 @@ fn run_decision_benchmarks(
                             error: None,
                         });
                     } else {
-                        results.0.push(SingleResult {
+                        results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
                             doc_id: doc.id,
                             expected_result: Value::Bool(false),
@@ -352,7 +370,7 @@ fn run_decision_benchmarks(
                     }
                 }
                 Err(model_err) => {
-                    results.0.push(SingleResult {
+                    results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
                         doc_id: doc.id,
                         expected_result: Value::Bool(false),
@@ -407,14 +425,17 @@ impl BenchmarkParameters {
             Some(config.max_ctx as u32)
         };
 
-        let mut benchmark_results = BenchmarkResults::init_empty();
+        let mut benchmark_results = BenchmarkResults::init_empty(&config.model);
         let mut model =
             LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
                 .expect("Language model is required to load for benchmarking its performance");
 
         let pb = ProgressBar::new(doc_to_process.len() as u64);
         for doc in &doc_to_process {
-            pb.set_message(format!("Performing Model benchmarks for document with id {}", doc.id));
+            pb.set_message(format!(
+                "Performing Model benchmarks for document with id {}",
+                doc.id
+            ));
             // this function is the only task running, so we do not care that the benchmark functions may block for a long time
             run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
             run_correspondent_suggest_benchmark(
@@ -430,8 +451,7 @@ impl BenchmarkParameters {
 
         //write results to disc
         if let Some(result_file_path) = &self.result_file {
-            let mut result_file =
-                File::create(result_file_path).unwrap();
+            let mut result_file = File::create(result_file_path).unwrap();
             let _ = write!(
                 &mut result_file,
                 "{}",
