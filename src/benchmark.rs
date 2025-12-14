@@ -1,7 +1,7 @@
 //! Module implementing some benchmarks, to evaluate how good of a job a certain model
 //! will do based on already verified documents in paperless
 
-use std::{fs::File, io::Write, path::Path};
+use std::{fs::{File, OpenOptions}, io::Write, path::Path};
 
 use indicatif::ProgressBar;
 use itertools::Itertools;
@@ -37,6 +37,9 @@ pub(crate) struct BenchmarkParameters {
 
     #[clap(long)]
     result_file: Option<String>,
+
+    #[clap(long, default_value = "false", action)]
+    view: bool
 }
 
 #[derive(
@@ -386,6 +389,17 @@ fn run_decision_benchmarks(
 
 impl BenchmarkParameters {
     pub async fn run(&self, config: Config) {
+        if self.view {
+            if let Some(result_file_path) = &self.result_file {
+                let rfile = OpenOptions::new().read(true).open(result_file_path).unwrap();
+                let benchmark_results: BenchmarkResults = serde_json::from_reader(rfile).expect("Invalid benchmark result file!");
+                benchmark_results.display_results();
+            } else {
+                println!("No result file path set no result to view! … Exiting")
+            }
+            return ();
+        }
+
         let mut api_client = Client::new_from_env();
         api_client.set_base_url(&config.paperless_server);
 
