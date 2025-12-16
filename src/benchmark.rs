@@ -8,24 +8,23 @@ use std::{
 };
 
 use indicatif::ProgressBar;
-use itertools::Itertools;
 use paperless_api_client::{
-    Client, custom_fields,
+    Client,
     types::{Correspondent, CustomField, Document},
 };
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantArray;
-use tabled::{Table, Tabled, builder::Builder, settings::Style};
+use tabled::{Table, Tabled, settings::Style};
 
 use crate::{
     config::Config,
-    extract::{LLModelExtractor, ModelError},
+    extract::LLModelExtractor,
     requests,
     types::{
-        Decision, FieldError, FieldExtract, custom_field_learning_supported,
-        schema_from_custom_field, schema_from_decision_question,
+        Decision, FieldExtract, custom_field_learning_supported, schema_from_custom_field,
+        schema_from_decision_question,
     },
 };
 
@@ -71,7 +70,8 @@ pub(crate) struct BenchmarkKindSummary {
     benchmak_type: BenchmarkResultType,
     success: usize,
     failed: usize,
-    errored: usize
+    errored: usize,
+    success_rate: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,7 +105,7 @@ impl BenchmarkResults {
                 .filter(|r| r.error.is_none())
                 .filter(|r| !r.success)
                 .count();
-            let errored= self
+            let errored = self
                 .results
                 .iter()
                 .filter(|r| r.benchmark_type == *benchmark_kind)
@@ -115,7 +115,16 @@ impl BenchmarkResults {
                 benchmak_type: benchmark_kind.clone(),
                 success: succeded,
                 failed,
-                errored
+                errored,
+                success_rate: format!(
+                    "{:.2} %",
+                    (succeded as f64) * 100.
+                        / (self
+                            .results
+                            .iter()
+                            .filter(|r| r.benchmark_type == *benchmark_kind)
+                            .count() as f64)
+                ),
             });
         }
         println!("{}", Table::new(table_rows).with(Style::ascii()));
