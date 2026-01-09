@@ -129,6 +129,27 @@ impl BenchmarkResults {
         }
         println!("{}", Table::new(table_rows).with(Style::ascii()));
     }
+    pub fn current_stats(&self) {
+        let succeded = self
+            .results
+            .iter()
+            .filter(|r| r.error.is_none())
+            .filter(|r| r.success)
+            .count();
+        let failed = self
+            .results
+            .iter()
+            .filter(|r| r.error.is_none())
+            .filter(|r| !r.success)
+            .count();
+        let errored = self
+            .results
+            .iter()
+            .filter(|r| r.error.is_some())
+            .count();
+        let success_rate = (succeded as f64) / ( succeded + failed + errored ) as f64;
+        println!("s:{succeded}|f:{failed}|e:{errored}|r:{success_rate}");
+    }
 }
 
 fn run_custom_field_benchmark(
@@ -479,13 +500,16 @@ impl BenchmarkParameters {
             ));
             // this function is the only task running, so we do not care that the benchmark functions may block for a long time
             run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
+            benchmark_results.current_stats();
             run_correspondent_suggest_benchmark(
                 &mut model,
                 doc,
                 &crrspndents,
                 &mut benchmark_results,
             );
+            benchmark_results.current_stats();
             run_decision_benchmarks(&mut model, doc, &crrspndents, &mut benchmark_results);
+            benchmark_results.current_stats();
             pb.inc(1);
         }
         pb.finish_with_message("All Documents processed, displaying model performance results!");
