@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Expand command line argument to include all configuration keys
+
+### Removed
+- Obsolete correspondent suggest configuration option
+
 ## [0.3.2 - 2025-12-08]
 
 ### Added
