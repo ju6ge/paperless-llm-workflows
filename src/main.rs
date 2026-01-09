@@ -30,9 +30,58 @@ compile_error!(
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
 struct Args {
     #[clap(subcommand)]
     action: Action,
+
+    /// Listen address of service
+    #[clap(long, global = true)]
+    host: Option<String>,
+
+    /// Listen port of service
+    #[clap(long, global = true)]
+    port: Option<u16>,
+
+    /// URL of the paperless instance
+    #[clap(long, global = true)]
+    paperless_server: Option<String>,
+
+    /// Path to the GGUF model file
+    #[clap(long, global = true)]
+    model: Option<String>,
+
+    /// Number of GPU layers for inference (0 = unlimited)
+    #[clap(long, global = true)]
+    num_gpu_layers: Option<usize>,
+
+    /// Maximum context size for inference (0 = use model default)
+    #[clap(long, global = true)]
+    max_ctx: Option<usize>,
+
+    /// Display name of the processing tag
+    #[clap(long, global = true)]
+    processing_tag: Option<String>,
+
+    /// Display color of the processing tag
+    #[clap(long, global = true)]
+    processing_color: Option<String>,
+
+    /// Display name of the finished tag
+    #[clap(long, global = true)]
+    finished_tag: Option<String>,
+
+    /// Display color of the finished tag
+    #[clap(long, global = true)]
+    finished_color: Option<String>,
+
+    /// Default user for tag creation
+    #[clap(long, global = true)]
+    tag_user_name: Option<String>,
+
+    /// Enable correspondent suggestions
+    #[clap(long, global = true)]
+    correspondent_suggestions: Option<bool>,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -51,7 +100,21 @@ async fn main() {
         .overlay_config(OverlayConfig::read_config_toml(Path::new(
             "/etc/paperless-field-extractor/config.toml",
         )))
-        .overlay_config(OverlayConfig::read_from_env());
+        .overlay_config(OverlayConfig::read_from_env())
+        .overlay_config(OverlayConfig {
+            host: args.host,
+            port: args.port,
+            paperless_server: args.paperless_server,
+            model: args.model,
+            num_gpu_layers: args.num_gpu_layers,
+            max_ctx: args.max_ctx,
+            processing_tag: args.processing_tag,
+            processing_color: args.processing_color,
+            finished_tag: args.finished_tag,
+            finished_color: args.finished_color,
+            tag_user_name: args.tag_user_name,
+            correspondent_suggestions: args.correspondent_suggestions,
+        });
 
 
     match args.action {
