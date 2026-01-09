@@ -78,10 +78,6 @@ struct Args {
     /// Default user for tag creation
     #[clap(long, global = true)]
     tag_user_name: Option<String>,
-
-    /// Enable correspondent suggestions
-    #[clap(long, global = true)]
-    correspondent_suggestions: Option<bool>,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -113,7 +109,6 @@ async fn main() {
             finished_tag: args.finished_tag,
             finished_color: args.finished_color,
             tag_user_name: args.tag_user_name,
-            correspondent_suggestions: args.correspondent_suggestions,
         });
 
 

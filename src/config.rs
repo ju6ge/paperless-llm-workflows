@@ -10,7 +10,6 @@ pub(crate) struct Config {
     pub(crate) paperless_server: String,
     pub(crate) processing_tag: String,
     pub(crate) processing_color: String,
-    pub(crate) correspondent_suggestions: bool,
     pub(crate) finished_tag: String,
     pub(crate) finished_color: String,
     pub(crate) tag_user_name: String,
@@ -26,7 +25,6 @@ pub(crate) struct OverlayConfig {
     pub(crate) paperless_server: Option<String>,
     pub(crate) processing_tag: Option<String>,
     pub(crate) processing_color: Option<String>,
-    pub(crate) correspondent_suggestions: Option<bool>,
     pub(crate) finished_tag: Option<String>,
     pub(crate) finished_color: Option<String>,
     pub(crate) tag_user_name: Option<String>,
@@ -51,7 +49,6 @@ impl Config {
             paperless_server: "https://example-paperless.domain".to_string(),
             processing_tag: processing_tag.to_string(),
             processing_color: "#ffe000".to_string(),
-            correspondent_suggestions: false,
             finished_tag: finished_tag.to_string(),
             finished_color: "#40aebf".to_string(),
             tag_user_name: tag_user.to_string(),
@@ -72,9 +69,6 @@ impl Config {
             processing_color: overlay_config
                 .processing_color
                 .unwrap_or(self.processing_color),
-            correspondent_suggestions: overlay_config
-                .correspondent_suggestions
-                .unwrap_or(self.correspondent_suggestions),
             finished_tag: overlay_config.finished_tag.unwrap_or(self.finished_tag),
             finished_color: overlay_config.finished_color.unwrap_or(self.finished_color),
             tag_user_name: overlay_config.tag_user_name.unwrap_or(self.tag_user_name),
@@ -113,9 +107,6 @@ impl OverlayConfig {
             paperless_server: std::env::var("PAPERLESS_SERVER").ok(),
             processing_tag: std::env::var("PROCESSING_TAG_NAME").ok(),
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
-            correspondent_suggestions: std::env::var("CORRESPONDENT_SUGGEST")
-                .ok()
-                .and_then(|v| v.parse().ok()),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),
             finished_color: std::env::var("FINSHED_TAG_COLOR").ok(),
             tag_user_name: std::env::var("PAPERLESS_USER").ok(),
