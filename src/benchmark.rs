@@ -6,7 +6,6 @@ use std::{
 };
 
 use crossbeam_channel::Sender;
-use indicatif::ProgressBar;
 use paperless_api_client::{
     Client,
     types::{Correspondent, CustomField, Document},
@@ -194,8 +193,8 @@ struct BenchmarkContext<'a> {
 fn run_custom_field_benchmark(
     ctx: &mut BenchmarkContext,
 ) {
+    // unused variables - these are parameters that are not used in the function
     let valid_doc_state = ctx.doc.clone();
-
     let mut test_doc_state = ctx.doc.clone();
     // make sure custom fields are unpopulated for the document data used
     // for testing the extraction of custom fields
@@ -228,7 +227,7 @@ fn run_custom_field_benchmark(
                                     // so this is the only case that is considered a success
                                     ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
-                                        doc_id: valid_doc_state.id,
+                                        doc_id: ctx.doc.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
@@ -238,7 +237,7 @@ fn run_custom_field_benchmark(
                                 } else {
                                     ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
-                                        doc_id: valid_doc_state.id,
+                                        doc_id: ctx.doc.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
@@ -250,7 +249,7 @@ fn run_custom_field_benchmark(
                             Err(err) => {
                                 ctx.results.results.push(SingleResult {
                                     benchmark_type: BenchmarkResultType::CustomFieldExtraction,
-                                    doc_id: valid_doc_state.id,
+                                    doc_id: ctx.doc.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                                     success: false,
@@ -262,7 +261,7 @@ fn run_custom_field_benchmark(
                     Err(model_err) => {
                         ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CustomFieldExtraction,
-                            doc_id: valid_doc_state.id,
+                            doc_id: ctx.doc.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                             benchmark_result: Value::Null,
                             success: false,
@@ -279,6 +278,7 @@ fn run_correspondent_suggest_benchmark(
     ctx: &mut BenchmarkContext,
 ) {
     let crrspndts_suggest_schema = crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
+    // unused variables - these are parameters that are not used in the function
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     if let Some(expected_correspondent) = ctx.doc
