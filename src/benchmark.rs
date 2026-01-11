@@ -1,6 +1,3 @@
-//! Module implementing some benchmarks, to evaluate how good of a job a certain model
-//! will do based on already verified documents in paperless
-
 use std::{
     fs::{File, OpenOptions},
     io::Write,
@@ -8,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use crossbeam_channel::Sender;
 use indicatif::ProgressBar;
 use paperless_api_client::{
     Client,
@@ -79,7 +77,7 @@ pub(crate) enum BenchmarkResultType {
     DecideInvalidCorrespondent,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct SingleResult {
     benchmark_type: BenchmarkResultType,
     doc_id: i64,
@@ -98,7 +96,7 @@ pub(crate) struct BenchmarkKindSummary {
     success_rate: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct BenchmarkResults {
     model: String,
     results: Vec<SingleResult>,
@@ -176,21 +174,35 @@ impl BenchmarkResults {
     }
 }
 
-fn run_custom_field_benchmark(
-    model: &mut LLModelExtractor,
-    doc: &Document,
-    custom_fields: &Vec<CustomField>,
-    results: &mut BenchmarkResults,
-) {
-    let valid_doc_state = doc.clone();
+#[derive(Debug, Clone)]
+pub(crate) enum ProgressUpdate {
+    Started { model_name: String, total_docs: usize },
+    DocumentProgress { doc_id: i64, progress: usize, total: usize },
+    Completed { model_name: String, results: BenchmarkResults },
+    Error { model_name: String, error: String },
+}
 
-    let mut test_doc_state = doc.clone();
+struct BenchmarkContext<'a> {
+    model: &'a mut LLModelExtractor,
+    doc: &'a Document,
+    custom_fields: &'a Vec<CustomField>,
+    crrspndents: &'a Vec<Correspondent>,
+    results: &'a mut BenchmarkResults,
+    progress_sender: Option<Sender<ProgressUpdate>>,
+}
+
+fn run_custom_field_benchmark(
+    ctx: &mut BenchmarkContext,
+) {
+    let valid_doc_state = ctx.doc.clone();
+
+    let mut test_doc_state = ctx.doc.clone();
     // make sure custom fields are unpopulated for the document data used
     // for testing the extraction of custom fields
     test_doc_state.custom_fields = None;
 
     if let Some(valid_doc_cfs) = &valid_doc_state.custom_fields {
-        for doc_cf in custom_fields
+        for doc_cf in ctx.custom_fields
             .iter()
             .filter(|cf| custom_field_learning_supported(cf))
             .filter_map(|cf| {
@@ -205,7 +217,7 @@ fn run_custom_field_benchmark(
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
 
-                match model.extract(&doc_data, &cf_grammar, false) {
+                match ctx.model.extract(&doc_data, &cf_grammar, false) {
                     Ok(extracted_value) => {
                         let field_extract: FieldExtract = serde_json::from_value(extracted_value)
                             .expect("grammar forced output to match type");
@@ -214,7 +226,7 @@ fn run_custom_field_benchmark(
                                 if extracted_cfi == *doc_cf.1 {
                                     // the extracted value corresponds exactly to the value of the validated documen
                                     // so this is the only case that is considered a success
-                                    results.results.push(SingleResult {
+                                    ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -224,7 +236,7 @@ fn run_custom_field_benchmark(
                                         error: None,
                                     });
                                 } else {
-                                    results.results.push(SingleResult {
+                                    ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: valid_doc_state.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -236,7 +248,7 @@ fn run_custom_field_benchmark(
                                 }
                             }
                             Err(err) => {
-                                results.results.push(SingleResult {
+                                ctx.results.results.push(SingleResult {
                                     benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                     doc_id: valid_doc_state.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -248,7 +260,7 @@ fn run_custom_field_benchmark(
                         }
                     }
                     Err(model_err) => {
-                        results.results.push(SingleResult {
+                        ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                             doc_id: valid_doc_state.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
@@ -264,29 +276,26 @@ fn run_custom_field_benchmark(
 }
 
 fn run_correspondent_suggest_benchmark(
-    model: &mut LLModelExtractor,
-    doc: &Document,
-    crrspndnts: &Vec<Correspondent>,
-    results: &mut BenchmarkResults,
+    ctx: &mut BenchmarkContext,
 ) {
-    let crrspndts_suggest_schema = crate::types::schema_from_correspondents(&crrspndnts.as_slice());
-    let doc_data = serde_json::to_value(&doc.content).unwrap();
+    let crrspndts_suggest_schema = crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
+    let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
-    if let Some(expected_correspondent) = doc
+    if let Some(expected_correspondent) = ctx.doc
         .correspondent
-        .map(|dcr| crrspndnts.iter().find(|c| c.id == dcr))
+        .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
-        match model.extract(&doc_data, &crrspndts_suggest_schema, false) {
+        match ctx.model.extract(&doc_data, &crrspndts_suggest_schema, false) {
             Ok(model_result_value) => {
                 let field_extract: FieldExtract = serde_json::from_value(model_result_value)
                     .expect("grammar enforces output matches type");
-                match field_extract.to_correspondent(&crrspndnts.as_slice()) {
+                match field_extract.to_correspondent(&ctx.crrspndents.as_slice()) {
                     Ok(suggested_crrspndnt) => {
                         if suggested_crrspndnt.id == expected_correspondent.id {
-                            results.results.push(SingleResult {
+                            ctx.results.results.push(SingleResult {
                                 benchmark_type: BenchmarkResultType::CorrespondentSuggest,
-                                doc_id: doc.id,
+                                doc_id: ctx.doc.id,
                                 expected_result: serde_json::to_value(
                                     expected_correspondent.name.clone(),
                                 )
@@ -297,9 +306,9 @@ fn run_correspondent_suggest_benchmark(
                                 error: None,
                             });
                         } else {
-                            results.results.push(SingleResult {
+                            ctx.results.results.push(SingleResult {
                                 benchmark_type: BenchmarkResultType::CorrespondentSuggest,
-                                doc_id: doc.id,
+                                doc_id: ctx.doc.id,
                                 expected_result: serde_json::to_value(
                                     expected_correspondent.name.clone(),
                                 )
@@ -312,9 +321,9 @@ fn run_correspondent_suggest_benchmark(
                         }
                     }
                     Err(err) => {
-                        results.results.push(SingleResult {
+                        ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CorrespondentSuggest,
-                            doc_id: doc.id,
+                            doc_id: ctx.doc.id,
                             expected_result: serde_json::to_value(
                                 expected_correspondent.name.clone(),
                             )
@@ -327,9 +336,9 @@ fn run_correspondent_suggest_benchmark(
                 }
             }
             Err(model_error) => {
-                results.results.push(SingleResult {
+                ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::CorrespondentSuggest,
-                    doc_id: doc.id,
+                    doc_id: ctx.doc.id,
                     expected_result: serde_json::to_value(expected_correspondent.name.clone())
                         .unwrap(),
                     benchmark_result: Value::Null,
@@ -350,17 +359,14 @@ fn run_correspondent_suggest_benchmark(
 /// is availible for every document, because otherwise this benchmark might become
 /// very depenendent on the paperless instances configuration
 fn run_decision_benchmarks(
-    model: &mut LLModelExtractor,
-    doc: &Document,
-    crrspndnts: &Vec<Correspondent>,
-    results: &mut BenchmarkResults,
+    ctx: &mut BenchmarkContext,
 ) {
-    let doc_data = serde_json::to_value(&doc.content).unwrap();
+    let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     // simple question is the correspondent correct, only if doc has correspondent!
-    if let Some(expected_correspondent) = doc
+    if let Some(expected_correspondent) = ctx.doc
         .correspondent
-        .map(|dcr| crrspndnts.iter().find(|c| c.id == dcr))
+        .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
         let expected_yes_question = format!(
@@ -368,23 +374,23 @@ fn run_decision_benchmarks(
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-        match model.extract(&doc_data, &question_schema, false) {
+        match ctx.model.extract(&doc_data, &question_schema, false) {
             Ok(model_answer_value) => {
                 let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
                     .expect("grammar constrains output to match type");
                 if model_decision.answer_bool {
-                    results.results.push(SingleResult {
+                    ctx.results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
-                        doc_id: doc.id,
+                        doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
                         success: true,
                         error: None,
                     });
                 } else {
-                    results.results.push(SingleResult {
+                    ctx.results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
-                        doc_id: doc.id,
+                        doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
                         success: false,
@@ -393,9 +399,9 @@ fn run_decision_benchmarks(
                 }
             }
             Err(model_err) => {
-                results.results.push(SingleResult {
+                ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
-                    doc_id: doc.id,
+                    doc_id: ctx.doc.id,
                     expected_result: Value::Bool(true),
                     benchmark_result: Value::Null,
                     success: false,
@@ -405,7 +411,7 @@ fn run_decision_benchmarks(
         }
 
         // only if there is only one possible correspondent, then this case will not run, because there is no false correspondent to select from …
-        if let Some(random_incorrect_correspondent) = crrspndnts
+        if let Some(random_incorrect_correspondent) = ctx.crrspndents
             .iter()
             .filter(|c| c.id != expected_correspondent.id)
             .choose(&mut rng())
@@ -415,24 +421,24 @@ fn run_decision_benchmarks(
                 random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
-            match model.extract(&doc_data, &question_schema, false) {
+            match ctx.model.extract(&doc_data, &question_schema, false) {
                 Ok(model_answer_value) => {
                     let model_decision: Decision =
                         serde_json::from_value(model_answer_value.clone())
                             .expect("grammar constrains output to match type");
                     if !model_decision.answer_bool {
-                        results.results.push(SingleResult {
+                        ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
-                            doc_id: doc.id,
+                            doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
                             success: true,
                             error: None,
                         });
                     } else {
-                        results.results.push(SingleResult {
+                        ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
-                            doc_id: doc.id,
+                            doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
                             success: false,
@@ -441,9 +447,9 @@ fn run_decision_benchmarks(
                     }
                 }
                 Err(model_err) => {
-                    results.results.push(SingleResult {
+                    ctx.results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
-                        doc_id: doc.id,
+                        doc_id: ctx.doc.id,
                         expected_result: Value::Bool(false),
                         benchmark_result: Value::Null,
                         success: false,
@@ -452,6 +458,49 @@ fn run_decision_benchmarks(
                 }
             }
         }
+    }
+}
+
+fn run_benchmark_for_document(
+    model: &mut LLModelExtractor,
+    doc: &Document,
+    custom_fields: &Vec<CustomField>,
+    crrspndents: &Vec<Correspondent>,
+    results: &mut BenchmarkResults,
+    progress_sender: Option<Sender<ProgressUpdate>>,
+    doc_index: usize,
+    total_docs: usize,
+) {
+    let mut ctx = BenchmarkContext {
+        model,
+        doc,
+        custom_fields,
+        crrspndents,
+        results,
+        progress_sender: progress_sender.clone(),
+    };
+
+    // Send progress update
+    if let Some(sender) = &progress_sender {
+        let _ = sender.send(ProgressUpdate::DocumentProgress {
+            doc_id: doc.id,
+            progress: doc_index,
+            total: total_docs,
+        });
+    }
+
+    // Run all benchmark types
+    run_custom_field_benchmark(&mut ctx);
+    run_correspondent_suggest_benchmark(&mut ctx);
+    run_decision_benchmarks(&mut ctx);
+
+    // Send stats update
+    if let Some(sender) = &progress_sender {
+        let _ = sender.send(ProgressUpdate::DocumentProgress {
+            doc_id: doc.id,
+            progress: doc_index + 1,
+            total: total_docs,
+        });
     }
 }
 
@@ -597,7 +646,7 @@ impl BenchmarkParameters {
         self.run_with_progress(config, None).await;
     }
 
-    pub async fn run_with_progress(&self, config: Config, progress_bar: Option<ProgressBar>) {
+    pub async fn run_with_progress(&self, config: Config, progress_sender: Option<Sender<ProgressUpdate>>) {
         if self.view {
             if let Some(result_file_path) = &self.result_file {
                 let rfile = OpenOptions::new()
@@ -608,7 +657,7 @@ impl BenchmarkParameters {
                     serde_json::from_reader(rfile).expect("Invalid benchmark result file!");
                 benchmark_results.display_results();
             } else {
-                println!("No result file path set no result to view! … Exiting");
+                println!("No result file path set no result to view! ... Exiting");
             }
             return ();
         }
@@ -657,27 +706,34 @@ impl BenchmarkParameters {
             LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
                 .expect("Language model is required to load for benchmarking its performance");
 
-        let pb = progress_bar.unwrap_or_else(|| ProgressBar::new(doc_to_process.len() as u64));
-        for doc in &doc_to_process {
-            pb.set_message(format!(
-                "Performing Model benchmarks for document with id {}",
-                doc.id
-            ));
-            // this function is the only task running, so we do not care that the benchmark functions may block for a long time
-            run_custom_field_benchmark(&mut model, doc, &custom_fields, &mut benchmark_results);
-            benchmark_results.current_stats();
-            run_correspondent_suggest_benchmark(
+        // Send start notification
+        if let Some(sender) = &progress_sender {
+            let _ = sender.send(ProgressUpdate::Started {
+                model_name: config.model.clone(),
+                total_docs: doc_to_process.len(),
+            });
+        }
+
+        for (i, doc) in doc_to_process.iter().enumerate() {
+            run_benchmark_for_document(
                 &mut model,
                 doc,
+                &custom_fields,
                 &crrspndents,
                 &mut benchmark_results,
+                progress_sender.clone(),
+                i,
+                doc_to_process.len(),
             );
-            benchmark_results.current_stats();
-            run_decision_benchmarks(&mut model, doc, &crrspndents, &mut benchmark_results);
-            benchmark_results.current_stats();
-            pb.inc(1);
         }
-        pb.finish_with_message("All Documents processed, displaying model performance results!");
+
+        // Send completion notification
+        if let Some(sender) = &progress_sender {
+            let _ = sender.send(ProgressUpdate::Completed {
+                model_name: config.model.clone(),
+                results: benchmark_results.clone(),
+            });
+        }
 
         //write results to disc
         if let Some(result_file_path) = &self.result_file {
