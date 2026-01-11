@@ -1830,6 +1830,7 @@ dependencies = [
  "toml",
  "utoipa",
  "utoipa-swagger-ui",
+ "walkdir",
 ]
 
 [[package]]

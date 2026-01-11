@@ -5,6 +5,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
     path::Path,
+    sync::Arc,
 };
 
 use indicatif::ProgressBar;
@@ -23,8 +24,8 @@ use crate::{
     extract::LLModelExtractor,
     requests,
     types::{
-        Decision, FieldExtract, custom_field_learning_supported, schema_from_custom_field,
-        schema_from_decision_question,
+        Decision, FieldExtract, custom_field_learning_supported,
+        schema_from_custom_field, schema_from_decision_question,
     },
 };
 
@@ -43,6 +44,29 @@ pub(crate) struct BenchmarkParameters {
 
     #[clap(long, default_value = "false", action)]
     view: bool,
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct MultiBenchmarkParameters {
+    #[clap(long)]
+    /// directory containing model files to benchmark
+    model_directory: String,
+
+    #[clap(long)]
+    /// output directory for results
+    output_directory: String,
+
+    #[clap(long)]
+    /// if set only document with this tag will be considered for benchmarking
+    verified_docs_tag: Option<String>,
+
+    #[clap(long)]
+    /// amount of documents to select from corpus, if unspecified all docs will be used!
+    sample_doc_size: Option<usize>,
+
+    #[clap(long, default_value = "4")]
+    /// number of parallel benchmark jobs
+    jobs: usize,
 }
 
 #[derive(
@@ -431,8 +455,149 @@ fn run_decision_benchmarks(
     }
 }
 
+impl MultiBenchmarkParameters {
+    pub async fn run(&self, config: Config) {
+        use std::fs;
+        use walkdir::WalkDir;
+
+        // Create output directory if it doesn't exist
+        fs::create_dir_all(&self.output_directory)
+            .expect("Failed to create output directory");
+
+        // Find all .gguf files in the model directory
+        let model_files = WalkDir::new(&self.model_directory)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|entry| {
+                entry.ok().and_then(|e| {
+                    if e.file_type().is_file() {
+                        let path = e.path();
+                        if let Some(ext) = path.extension() {
+                            if ext.eq_ignore_ascii_case("gguf") {
+                                return Some(path.to_path_buf());
+                            }
+                        }
+                    }
+                    None
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if model_files.is_empty() {
+            eprintln!("No .gguf model files found in {}", self.model_directory);
+            return;
+        }
+
+        println!(
+            "Found {} model(s) to benchmark",
+            model_files.len()
+        );
+
+        // Prepare benchmark configuration
+        let benchmark_config = BenchmarkConfig {
+            verified_docs_tag: self.verified_docs_tag.clone(),
+            sample_doc_size: self.sample_doc_size,
+        };
+
+        // Run benchmarks in parallel
+        let mut handles = Vec::new();
+        let model_files_arc = Arc::new(model_files);
+        let output_dir_arc = Arc::new(self.output_directory.clone());
+        let config_arc = Arc::new(config);
+        let benchmark_config_arc = Arc::new(benchmark_config);
+
+        // Pre-compute result names for all models
+        let result_names: Vec<String> = model_files_arc.iter()
+            .map(|model_file| self.filename_to_result_name(model_file))
+            .collect();
+
+        for (i, model_file) in model_files_arc.iter().enumerate() {
+            let model_file = model_file.clone();
+            let output_dir = output_dir_arc.clone();
+            let config = config_arc.clone();
+            let benchmark_config = benchmark_config_arc.clone();
+            let result_name = result_names[i].clone();
+
+            // Spawn benchmark task
+            let handle = tokio::spawn(async move {
+                let result_file = format!("{}/{}_results.json", output_dir, result_name);
+
+                println!(
+                    "Starting benchmark {}: {} -> {}",
+                    i + 1,
+                    model_file.display(),
+                    result_file
+                );
+
+                let mut config_copy = (*config).clone();
+                config_copy.model = model_file.to_string_lossy().into_owned();
+
+                let params = BenchmarkParameters {
+                    verified_docs_tag: benchmark_config.verified_docs_tag.clone(),
+                    sample_doc_size: benchmark_config.sample_doc_size,
+                    result_file: Some(result_file),
+                    view: false,
+                };
+
+                params.run_with_progress(config_copy, None).await;
+            });
+
+            handles.push(handle);
+
+            // Limit concurrent jobs
+            if handles.len() >= self.jobs {
+                // Wait for one job to complete
+                let handle = handles.pop().unwrap();
+                let result = handle.await;
+                if let Err(e) = result {
+                    eprintln!("Benchmark failed: {}", e);
+                }
+            }
+        }
+
+        // Wait for remaining jobs
+        for handle in handles {
+            let result = handle.await;
+            if let Err(e) = result {
+                eprintln!("Benchmark failed: {}", e);
+            }
+        }
+
+        println!("All benchmarks completed!");
+    }
+
+    fn filename_to_result_name(&self, path: &Path) -> String {
+        let filename = path.file_name().unwrap().to_string_lossy();
+        let filename = filename.trim_end_matches(".gguf").trim_end_matches(".GGUF");
+        
+        // Convert to lowercase and replace common separators with hyphens
+        let mut result_name = filename.to_lowercase();
+        result_name = result_name.replace(|c: char| c == ' ' || c == '_' || c == '.' || c == '/', "-");
+        result_name = result_name.replace("-", "-");
+        
+        // Remove multiple consecutive hyphens
+        result_name = result_name.replace("---", "-");
+        while result_name.contains("--") {
+            result_name = result_name.replace("--", "-");
+        }
+        
+        // Remove leading/trailing hyphens
+        result_name.trim_matches('-').to_string()
+    }
+}
+
+#[derive(Clone)]
+struct BenchmarkConfig {
+    verified_docs_tag: Option<String>,
+    sample_doc_size: Option<usize>,
+}
+
 impl BenchmarkParameters {
     pub async fn run(&self, config: Config) {
+        self.run_with_progress(config, None).await;
+    }
+
+    pub async fn run_with_progress(&self, config: Config, progress_bar: Option<ProgressBar>) {
         if self.view {
             if let Some(result_file_path) = &self.result_file {
                 let rfile = OpenOptions::new()
@@ -443,7 +608,7 @@ impl BenchmarkParameters {
                     serde_json::from_reader(rfile).expect("Invalid benchmark result file!");
                 benchmark_results.display_results();
             } else {
-                println!("No result file path set no result to view! … Exiting")
+                println!("No result file path set no result to view! … Exiting");
             }
             return ();
         }
@@ -492,7 +657,7 @@ impl BenchmarkParameters {
             LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
                 .expect("Language model is required to load for benchmarking its performance");
 
-        let pb = ProgressBar::new(doc_to_process.len() as u64);
+        let pb = progress_bar.unwrap_or_else(|| ProgressBar::new(doc_to_process.len() as u64));
         for doc in &doc_to_process {
             pb.set_message(format!(
                 "Performing Model benchmarks for document with id {}",

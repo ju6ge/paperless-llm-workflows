@@ -1,6 +1,6 @@
 use std::{path::Path, process::exit};
 
-use benchmark::BenchmarkParameters;
+use benchmark::{BenchmarkParameters, MultiBenchmarkParameters};
 use clap::Parser;
 use config::{Config, OverlayConfig};
 use paperless_api_client::Client;
@@ -85,6 +85,7 @@ enum Action {
     GenApiSpec,
     Server,
     Benchmark(BenchmarkParameters),
+    MultiBenchmark(MultiBenchmarkParameters),
 }
 
 #[tokio::main]
@@ -123,6 +124,10 @@ async fn main() {
         }
         Action::Benchmark(benchmark_parameters) => {
             benchmark_parameters.run(config).await;
+            exit(0);
+        }
+        Action::MultiBenchmark(multi_benchmark_parameters) => {
+            multi_benchmark_parameters.run(config).await;
             exit(0);
         }
         Action::Server => { /* keep going other option stop execution after completion */ }
