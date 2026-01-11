@@ -1480,8 +1480,8 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llama-cpp-2"
-version = "0.1.130"
-source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#5aaa4daa08cb3ef7c35c768cf65086eff8f1825b"
+version = "0.1.131"
+source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#07055380fe81b722b9a3b962b044e5637493ca69"
 dependencies = [
  "enumflags2",
  "llama-cpp-sys-2",
@@ -1492,8 +1492,8 @@ dependencies = [
 
 [[package]]
 name = "llama-cpp-sys-2"
-version = "0.1.130"
-source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#5aaa4daa08cb3ef7c35c768cf65086eff8f1825b"
+version = "0.1.131"
+source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#07055380fe81b722b9a3b962b044e5637493ca69"
 dependencies = [
  "bindgen",
  "cc",
