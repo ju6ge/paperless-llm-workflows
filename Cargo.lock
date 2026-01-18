@@ -925,8 +925,9 @@ dependencies = [
 
 [[package]]
 name = "gbnf"
-version = "0.2.5"
-source = "git+https://github.com/ju6ge/gbnf?branch=feature%2Fconst-array-support#58e62dac921061fd9b3dc3e400551ef70cb85ec4"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bf2a65b6f5f2d9e23862487fff5f6c475ada612b2f3913ac9794015d129a9f1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1480,9 +1481,10 @@ checksum = "6373607a59f0be73a39b6fe456b8192fcc3585f602af20751600e974dd455e77"
 
 [[package]]
 name = "llama-cpp-2"
-version = "0.1.131"
-source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#07055380fe81b722b9a3b962b044e5637493ca69"
+version = "0.1.132"
+source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=refactor%2Ftoken-decoding#7aa8bff1b517be6ad39867d858000550bc70819e"
 dependencies = [
+ "encoding_rs",
  "enumflags2",
  "llama-cpp-sys-2",
  "thiserror 1.0.69",
@@ -1492,8 +1494,8 @@ dependencies = [
 
 [[package]]
 name = "llama-cpp-sys-2"
-version = "0.1.131"
-source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=fix%2Fallow-decoding-eos-tokens#07055380fe81b722b9a3b962b044e5637493ca69"
+version = "0.1.132"
+source = "git+https://github.com/ju6ge/llama-cpp-rs?branch=refactor%2Ftoken-decoding#7aa8bff1b517be6ad39867d858000550bc70819e"
 dependencies = [
  "bindgen",
  "cc",

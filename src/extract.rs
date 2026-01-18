@@ -4,7 +4,7 @@ use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, Special};
+use llama_cpp_2::model::{AddBos};
 use llama_cpp_2::sampling::LlamaSampler;
 use schemars::Schema;
 use serde_json::Value;
@@ -87,8 +87,9 @@ impl LLModelExtractor {
             .with_n_ctx(Some(NonZeroU32::new(ctx_size).unwrap()))
             .with_n_batch(ctx_size);
 
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
         let eos_string = &model
-            .token_to_str(model.token_eos(), Special::Tokenize)
+            .token_to_piece(model.token_eos(), &mut decoder, true, None)
             .unwrap()
             .to_string();
 
@@ -144,21 +145,16 @@ impl LLModelExtractor {
             {
                 let token = sampler.sample(&ctx, batch.n_tokens() - 1);
 
+                // grammar sampling alread accepts this so calling accept again leads to segfaults
                 //sampler.accept(token);
 
                 // is it an end of stream?
                 if token == self.model.token_eos() || output.ends_with(&self.eos_string) {
-                    eprintln!();
                     break;
                 }
 
-                let output_bytes = self.model.token_to_bytes(token, Special::Tokenize).unwrap();
-                // use `Decoder.decode_to_string()` to avoid the intermediate buffer
-                let mut output_string = String::with_capacity(128);
-                let _decode_result =
-                    decoder.decode_to_string(&output_bytes, &mut output_string, false);
+                let output_string = self.model.token_to_piece(token, &mut decoder, true, None).unwrap();
                 if dry_run {
-                    //println!("{output_string}\t\t token_cnt: {n_cur}");
                     print!("{output_string}");
                     if n_cur % 100 == 0 {
                         let _ = std::io::stdout().flush();
