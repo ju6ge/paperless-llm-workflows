@@ -516,6 +516,7 @@ impl MultiBenchmarkParameters {
         // Find all .gguf files in the model directory
         let model_files = WalkDir::new(&self.model_directory)
             .max_depth(1)
+            .follow_links(true)
             .into_iter()
             .filter_map(|entry| {
                 entry.ok().and_then(|e| {
@@ -523,6 +524,7 @@ impl MultiBenchmarkParameters {
                         let path = e.path();
                         if let Some(ext) = path.extension() {
                             if ext.eq_ignore_ascii_case("gguf") {
+                                //eprintln!("{path:?}");
                                 return Some(path.to_path_buf());
                             }
                         }
