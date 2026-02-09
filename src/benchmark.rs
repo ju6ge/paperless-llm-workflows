@@ -5,11 +5,12 @@ use std::{
     sync::Arc,
 };
 
-use crossbeam_channel::Sender;
+use actix_web::App;
 use paperless_api_client::{
     Client,
     types::{Correspondent, CustomField, Document},
 };
+use procspawn::ProcConfig;
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,13 +21,14 @@ use crate::{
     config::Config,
     extract::LLModelExtractor,
     requests,
+    tui::BenchmarkApp,
     types::{
-        Decision, FieldExtract, custom_field_learning_supported,
-        schema_from_custom_field, schema_from_decision_question,
+        Decision, FieldExtract, custom_field_learning_supported, schema_from_custom_field,
+        schema_from_decision_question,
     },
 };
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 pub(crate) struct BenchmarkParameters {
     #[clap(long)]
     /// if set only document with this tag will be considered for benchmarking
@@ -43,7 +45,7 @@ pub(crate) struct BenchmarkParameters {
     view: bool,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, clap::Args, Serialize, Deserialize)]
 pub(crate) struct MultiBenchmarkParameters {
     #[clap(long)]
     /// directory containing model files to benchmark
@@ -150,6 +152,7 @@ impl BenchmarkResults {
         }
         println!("{}", Table::new(table_rows).with(Style::ascii()));
     }
+
     pub fn current_stats(&self) {
         let succeded = self
             .results
@@ -163,22 +166,32 @@ impl BenchmarkResults {
             .filter(|r| r.error.is_none())
             .filter(|r| !r.success)
             .count();
-        let errored = self
-            .results
-            .iter()
-            .filter(|r| r.error.is_some())
-            .count();
-        let success_rate = (succeded as f64) / ( succeded + failed + errored ) as f64;
+        let errored = self.results.iter().filter(|r| r.error.is_some()).count();
+        let success_rate = (succeded as f64) / (succeded + failed + errored) as f64;
         println!("s:{succeded}|f:{failed}|e:{errored}|r:{success_rate}");
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub(crate) enum ProgressUpdate {
-    Started { model_name: String, total_docs: usize },
-    DocumentProgress { doc_id: i64, progress: usize, total: usize },
-    Completed { model_name: String, results: BenchmarkResults },
-    Error { model_name: String, error: String },
+    Started {
+        model_name: String,
+        total_docs: usize,
+    },
+    DocumentProgress {
+        doc_id: i64,
+        progress: usize,
+        total: usize,
+    },
+    BenchmarkResults {
+        model_name: String,
+        results: BenchmarkResults,
+    },
+    Error {
+        model_name: String,
+        error: String,
+    },
 }
 
 struct BenchmarkContext<'a> {
@@ -187,12 +200,10 @@ struct BenchmarkContext<'a> {
     custom_fields: &'a Vec<CustomField>,
     crrspndents: &'a Vec<Correspondent>,
     results: &'a mut BenchmarkResults,
-    progress_sender: Option<Sender<ProgressUpdate>>,
+    progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
 }
 
-fn run_custom_field_benchmark(
-    ctx: &mut BenchmarkContext,
-) {
+fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
     // unused variables - these are parameters that are not used in the function
     let valid_doc_state = ctx.doc.clone();
     let mut test_doc_state = ctx.doc.clone();
@@ -201,7 +212,8 @@ fn run_custom_field_benchmark(
     test_doc_state.custom_fields = None;
 
     if let Some(valid_doc_cfs) = &valid_doc_state.custom_fields {
-        for doc_cf in ctx.custom_fields
+        for doc_cf in ctx
+            .custom_fields
             .iter()
             .filter(|cf| custom_field_learning_supported(cf))
             .filter_map(|cf| {
@@ -274,19 +286,22 @@ fn run_custom_field_benchmark(
     }
 }
 
-fn run_correspondent_suggest_benchmark(
-    ctx: &mut BenchmarkContext,
-) {
-    let crrspndts_suggest_schema = crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
+fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
+    let crrspndts_suggest_schema =
+        crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
     // unused variables - these are parameters that are not used in the function
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
-    if let Some(expected_correspondent) = ctx.doc
+    if let Some(expected_correspondent) = ctx
+        .doc
         .correspondent
         .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
-        match ctx.model.extract(&doc_data, &crrspndts_suggest_schema, false) {
+        match ctx
+            .model
+            .extract(&doc_data, &crrspndts_suggest_schema, false)
+        {
             Ok(model_result_value) => {
                 let field_extract: FieldExtract = serde_json::from_value(model_result_value)
                     .expect("grammar enforces output matches type");
@@ -358,13 +373,12 @@ fn run_correspondent_suggest_benchmark(
 /// on the document metadata programmatically may be used. This means only data that
 /// is availible for every document, because otherwise this benchmark might become
 /// very depenendent on the paperless instances configuration
-fn run_decision_benchmarks(
-    ctx: &mut BenchmarkContext,
-) {
+fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     // simple question is the correspondent correct, only if doc has correspondent!
-    if let Some(expected_correspondent) = ctx.doc
+    if let Some(expected_correspondent) = ctx
+        .doc
         .correspondent
         .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
@@ -411,7 +425,8 @@ fn run_decision_benchmarks(
         }
 
         // only if there is only one possible correspondent, then this case will not run, because there is no false correspondent to select from …
-        if let Some(random_incorrect_correspondent) = ctx.crrspndents
+        if let Some(random_incorrect_correspondent) = ctx
+            .crrspndents
             .iter()
             .filter(|c| c.id != expected_correspondent.id)
             .choose(&mut rng())
@@ -467,7 +482,7 @@ fn run_benchmark_for_document(
     custom_fields: &Vec<CustomField>,
     crrspndents: &Vec<Correspondent>,
     results: &mut BenchmarkResults,
-    progress_sender: Option<Sender<ProgressUpdate>>,
+    progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
     doc_index: usize,
     total_docs: usize,
 ) {
@@ -510,8 +525,7 @@ impl MultiBenchmarkParameters {
         use walkdir::WalkDir;
 
         // Create output directory if it doesn't exist
-        fs::create_dir_all(&self.output_directory)
-            .expect("Failed to create output directory");
+        fs::create_dir_all(&self.output_directory).expect("Failed to create output directory");
 
         // Find all .gguf files in the model directory
         let model_files = WalkDir::new(&self.model_directory)
@@ -539,10 +553,7 @@ impl MultiBenchmarkParameters {
             return;
         }
 
-        println!(
-            "Found {} model(s) to benchmark",
-            model_files.len()
-        );
+        println!("Found {} model(s) to benchmark", model_files.len());
 
         // Prepare benchmark configuration
         let benchmark_config = BenchmarkConfig {
@@ -558,7 +569,8 @@ impl MultiBenchmarkParameters {
         let benchmark_config_arc = Arc::new(benchmark_config);
 
         // Pre-compute result names for all models
-        let result_names: Vec<String> = model_files_arc.iter()
+        let result_names: Vec<String> = model_files_arc
+            .iter()
             .map(|model_file| self.filename_to_result_name(model_file))
             .collect();
 
@@ -590,7 +602,7 @@ impl MultiBenchmarkParameters {
                     view: false,
                 };
 
-                params.run_with_progress(config_copy, None).await;
+                //params.run_with_progress(config_copy, None).await;
             });
 
             handles.push(handle);
@@ -620,18 +632,19 @@ impl MultiBenchmarkParameters {
     fn filename_to_result_name(&self, path: &Path) -> String {
         let filename = path.file_name().unwrap().to_string_lossy();
         let filename = filename.trim_end_matches(".gguf").trim_end_matches(".GGUF");
-        
+
         // Convert to lowercase and replace common separators with hyphens
         let mut result_name = filename.to_lowercase();
-        result_name = result_name.replace(|c: char| c == ' ' || c == '_' || c == '.' || c == '/', "-");
+        result_name =
+            result_name.replace(|c: char| c == ' ' || c == '_' || c == '.' || c == '/', "-");
         result_name = result_name.replace("-", "-");
-        
+
         // Remove multiple consecutive hyphens
         result_name = result_name.replace("---", "-");
         while result_name.contains("--") {
             result_name = result_name.replace("--", "-");
         }
-        
+
         // Remove leading/trailing hyphens
         result_name.trim_matches('-').to_string()
     }
@@ -644,11 +657,7 @@ struct BenchmarkConfig {
 }
 
 impl BenchmarkParameters {
-    pub async fn run(&self, config: Config) {
-        self.run_with_progress(config, None).await;
-    }
-
-    pub async fn run_with_progress(&self, config: Config, progress_sender: Option<Sender<ProgressUpdate>>) {
+    pub async fn run_tui(&self, config: Config) {
         if self.view {
             if let Some(result_file_path) = &self.result_file {
                 let rfile = OpenOptions::new()
@@ -663,7 +672,22 @@ impl BenchmarkParameters {
             }
             return ();
         }
+        let _ = procspawn::init();
+        let shared_running_flag = Arc::new(tokio::sync::RwLock::new(true));
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let terminal = ratatui::init();
+        let tui = BenchmarkApp::new(shared_running_flag.clone(), rx).run(terminal);
+        let benchmark = self.run_with_progress(config, Some(tx), shared_running_flag);
+        let _ = tokio::join!(tui, benchmark);
+        ratatui::restore();
+    }
 
+    pub async fn run_with_progress(
+        &self,
+        config: Config,
+        progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
+        shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
+    ) {
         let mut api_client = Client::new_from_env();
         api_client.set_base_url(&config.paperless_server);
 
@@ -703,50 +727,49 @@ impl BenchmarkParameters {
             Some(config.max_ctx as u32)
         };
 
-        let mut benchmark_results = BenchmarkResults::init_empty(&config.model);
-        let mut model =
-            LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
-                .expect("Language model is required to load for benchmarking its performance");
+        let (process_tx, process_rx) = ipc_channel::ipc::channel::<ProgressUpdate>().unwrap();
+        let benchmark_process = tokio::task::spawn_blocking(move || {
+            let mut benchmark_results = BenchmarkResults::init_empty(&config.model);
+            let mut model =
+                LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
+                    .expect("Language model is required to load for benchmarking its performance");
 
-        // Send start notification
-        if let Some(sender) = &progress_sender {
-            let _ = sender.send(ProgressUpdate::Started {
+            // Send start notification
+            let _ = process_tx.send(ProgressUpdate::Started {
                 model_name: config.model.clone(),
                 total_docs: doc_to_process.len(),
             });
-        }
 
-        for (i, doc) in doc_to_process.iter().enumerate() {
-            run_benchmark_for_document(
-                &mut model,
-                doc,
-                &custom_fields,
-                &crrspndents,
-                &mut benchmark_results,
-                progress_sender.clone(),
-                i,
-                doc_to_process.len(),
-            );
-        }
+            for (i, doc) in doc_to_process.iter().enumerate() {
+                run_benchmark_for_document(
+                    &mut model,
+                    doc,
+                    &custom_fields,
+                    &crrspndents,
+                    &mut benchmark_results,
+                    None,
+                    i,
+                    doc_to_process.len(),
+                );
+            }
 
-        // Send completion notification
-        if let Some(sender) = &progress_sender {
-            let _ = sender.send(ProgressUpdate::Completed {
+            // Send completion notification
+            let _ = process_tx.send(ProgressUpdate::BenchmarkResults {
                 model_name: config.model.clone(),
                 results: benchmark_results.clone(),
             });
-        }
+        });
 
-        //write results to disc
-        if let Some(result_file_path) = &self.result_file {
-            let mut result_file = File::create(result_file_path).unwrap();
-            let _ = write!(
-                &mut result_file,
-                "{}",
-                serde_json::to_string(&benchmark_results).unwrap()
-            );
-        }
+        let process_updates_mapper = async || {
+            while true {
+                if let Ok(message) = process_rx.recv() {
+                    if let Some(ui_update_channel) = &progress_sender {
+                        ui_update_channel.send(message);
+                    }
+                }
+            }
+        };
 
-        benchmark_results.display_results();
+        let _ = tokio::join!(benchmark_process, process_updates_mapper());
     }
 }

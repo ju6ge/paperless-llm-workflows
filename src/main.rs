@@ -13,6 +13,7 @@ mod extract;
 mod requests;
 mod server;
 mod types;
+mod tui;
 
 #[cfg(any(
     all(feature = "vulkan", feature = "openmp"),
@@ -123,7 +124,7 @@ async fn main() {
             exit(0);
         }
         Action::Benchmark(benchmark_parameters) => {
-            benchmark_parameters.run(config).await;
+            benchmark_parameters.run_tui(config).await;
             exit(0);
         }
         Action::MultiBenchmark(multi_benchmark_parameters) => {
