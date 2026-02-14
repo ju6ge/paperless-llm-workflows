@@ -12,8 +12,8 @@ mod config;
 mod extract;
 mod requests;
 mod server;
-mod types;
 mod tui;
+mod types;
 
 #[cfg(any(
     all(feature = "vulkan", feature = "openmp"),
@@ -85,12 +85,23 @@ struct Args {
 enum Action {
     GenApiSpec,
     Server,
+    #[clap(hide(true))]
+    BenchmarkWorker,
     Benchmark(BenchmarkParameters),
     MultiBenchmark(MultiBenchmarkParameters),
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(1024 * 4000)
+        .build()
+        .unwrap();
+
+    rt.block_on(async_main());
+}
+
+async fn async_main() {
     let args = Args::parse();
     //colog::init();
 
@@ -113,7 +124,6 @@ async fn main() {
             tag_user_name: args.tag_user_name,
         });
 
-
     match args.action {
         Action::GenApiSpec => {
             println!(
@@ -122,6 +132,9 @@ async fn main() {
                     .unwrap()
             );
             exit(0);
+        }
+        Action::BenchmarkWorker => {
+            tokio::task::spawn_blocking(benchmark::benchmark_worker).await;
         }
         Action::Benchmark(benchmark_parameters) => {
             benchmark_parameters.run_tui(config).await;

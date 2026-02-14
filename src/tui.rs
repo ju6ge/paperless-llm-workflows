@@ -1,12 +1,14 @@
 use std::{collections::BTreeMap, process, sync::Arc};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use futures::{FutureExt, StreamExt};
+use futures::{select, FutureExt, StreamExt};
+use futures_timer::Delay;
 use itertools::Itertools;
 use ratatui::{
     layout::{Layout, Constraint}, style::Stylize, text::Line, widgets::{Block, Paragraph}, DefaultTerminal, Frame,
 };
 use tokio::sync::{Mutex, RwLock};
+use tokio::time::{Duration};
 
 use crate::benchmark::ProgressUpdate;
 
@@ -68,7 +70,7 @@ impl BenchmarkApp {
         let text = "\n\
             \n\
             Press `Esc`, `Ctrl-C` or `q` to stop running.";
-        let log = format!("LOG:\n{}", log_messages.iter().map(|_| "").join("\n-"));
+        let log = format!("LOG:\n{}", log_messages.iter().map(|m| format!("{:?}",m)).join("\n-"));
 
         let vertical = Layout::vertical([Length(6), Min(0)]);
         let [ title_area, content_area ] = vertical.areas(frame.area());
@@ -90,15 +92,22 @@ impl BenchmarkApp {
 
     /// Reads the crossterm events and updates the state of [`App`].
     async fn handle_crossterm_events(&self) -> color_eyre::Result<()> {
-        let event = self.event_stream.lock().await.next().fuse().await;
-        match event {
-            Some(Ok(evt)) => match evt {
-                Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key).await,
-                Event::Mouse(_) => {}
-                Event::Resize(_, _) => {}
-                _ => {}
-            },
-            _ => {}
+        let mut event_stream = self.event_stream.lock().await;
+        let mut event = event_stream.next().fuse();
+        let mut delay = Delay::new(Duration::from_millis(500)).fuse();
+        select! {
+            _ = delay => {}
+            maybe_event = event => {
+                match maybe_event {
+                    Some(Ok(evt)) => match evt {
+                        Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key).await,
+                        Event::Mouse(_) => {}
+                        Event::Resize(_, _) => {}
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
         }
         Ok(())
     }

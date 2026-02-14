@@ -1,9 +1,9 @@
 use std::{fs::File, io::Read, path::Path};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Config {
     pub(crate) host: String,
     pub(crate) port: u16,

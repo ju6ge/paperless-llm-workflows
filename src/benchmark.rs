@@ -1,21 +1,22 @@
-use std::{
-    fs::{File, OpenOptions},
-    io::Write,
-    path::Path,
-    sync::Arc,
-};
+use std::{env, fs::OpenOptions, io::Write, path::Path, sync::{Arc}};
 
-use actix_web::App;
+use futures::{select, FutureExt};
+use futures_timer::Delay;
 use paperless_api_client::{
     Client,
     types::{Correspondent, CustomField, Document},
 };
-use procspawn::ProcConfig;
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantArray;
 use tabled::{Table, Tabled, settings::Style};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
+    sync::RwLock,
+    time::Duration,
+};
 
 use crate::{
     config::Config,
@@ -200,7 +201,6 @@ struct BenchmarkContext<'a> {
     custom_fields: &'a Vec<CustomField>,
     crrspndents: &'a Vec<Correspondent>,
     results: &'a mut BenchmarkResults,
-    progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
 }
 
 fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
@@ -482,7 +482,7 @@ fn run_benchmark_for_document(
     custom_fields: &Vec<CustomField>,
     crrspndents: &Vec<Correspondent>,
     results: &mut BenchmarkResults,
-    progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
+    log_to_stdio: bool,
     doc_index: usize,
     total_docs: usize,
 ) {
@@ -492,16 +492,20 @@ fn run_benchmark_for_document(
         custom_fields,
         crrspndents,
         results,
-        progress_sender: progress_sender.clone(),
     };
 
     // Send progress update
-    if let Some(sender) = &progress_sender {
-        let _ = sender.send(ProgressUpdate::DocumentProgress {
-            doc_id: doc.id,
-            progress: doc_index,
-            total: total_docs,
-        });
+    if log_to_stdio {
+        writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::DocumentProgress {
+                doc_id: doc.id,
+                progress: doc_index,
+                total: total_docs,
+            })
+            .unwrap()
+        );
     }
 
     // Run all benchmark types
@@ -510,12 +514,17 @@ fn run_benchmark_for_document(
     run_decision_benchmarks(&mut ctx);
 
     // Send stats update
-    if let Some(sender) = &progress_sender {
-        let _ = sender.send(ProgressUpdate::DocumentProgress {
-            doc_id: doc.id,
-            progress: doc_index + 1,
-            total: total_docs,
-        });
+    if log_to_stdio {
+        writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::DocumentProgress {
+                doc_id: doc.id,
+                progress: doc_index + 1,
+                total: total_docs,
+            })
+            .unwrap()
+        );
     }
 }
 
@@ -656,6 +665,72 @@ struct BenchmarkConfig {
     sample_doc_size: Option<usize>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct BenchmarkWorkerData {
+    config: Config,
+    doc_to_process: Vec<Document>,
+    custom_fields: Vec<CustomField>,
+    crrspndents: Vec<Correspondent>,
+}
+
+/// this function implements a benchmark worker as it's own subprocess
+///
+/// benchmarking multiple models in parallell requires multiple instances of llama.cpp. This is only possible when running llama.cpp in multiple isolated processes
+pub(crate) fn benchmark_worker() {
+    let mut benchmark_job_str = String::new();
+    std::io::stdin().read_line(&mut benchmark_job_str);
+    let benchmark_job_data: BenchmarkWorkerData = serde_json::from_str(&benchmark_job_str).unwrap();
+
+    let max_ctx = if benchmark_job_data.config.max_ctx == 0 {
+        None
+    } else {
+        Some(benchmark_job_data.config.max_ctx as u32)
+    };
+
+    let mut benchmark_results = BenchmarkResults::init_empty(&benchmark_job_data.config.model);
+    let mut model = LLModelExtractor::new(
+        Path::new(&benchmark_job_data.config.model),
+        benchmark_job_data.config.num_gpu_layers,
+        max_ctx,
+    )
+    .expect("Language model is required to load for benchmarking its performance");
+
+    // Send start notification
+    writeln!(
+        std::io::stdout(),
+        "{}",
+        serde_json::to_string(&ProgressUpdate::Started {
+            model_name: benchmark_job_data.config.model.clone(),
+            total_docs: benchmark_job_data.doc_to_process.len(),
+        })
+        .unwrap()
+    );
+
+    for (i, doc) in benchmark_job_data.doc_to_process.iter().enumerate() {
+        run_benchmark_for_document(
+            &mut model,
+            doc,
+            &benchmark_job_data.custom_fields,
+            &benchmark_job_data.crrspndents,
+            &mut benchmark_results,
+            true,
+            i,
+            benchmark_job_data.doc_to_process.len(),
+        );
+    }
+
+    // Send completion notification
+    writeln!(
+        std::io::stdout(),
+        "{}",
+        serde_json::to_string(&ProgressUpdate::BenchmarkResults {
+            model_name: benchmark_job_data.config.model.clone(),
+            results: benchmark_results.clone(),
+        })
+        .unwrap()
+    );
+}
+
 impl BenchmarkParameters {
     pub async fn run_tui(&self, config: Config) {
         if self.view {
@@ -672,7 +747,6 @@ impl BenchmarkParameters {
             }
             return ();
         }
-        let _ = procspawn::init();
         let shared_running_flag = Arc::new(tokio::sync::RwLock::new(true));
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let terminal = ratatui::init();
@@ -685,7 +759,7 @@ impl BenchmarkParameters {
     pub async fn run_with_progress(
         &self,
         config: Config,
-        progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
+        mut progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
         shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     ) {
         let mut api_client = Client::new_from_env();
@@ -721,55 +795,74 @@ impl BenchmarkParameters {
                 .choose_multiple(&mut rng(), sample_size);
         }
 
-        let max_ctx = if config.max_ctx == 0 {
-            None
-        } else {
-            Some(config.max_ctx as u32)
-        };
+        let ownbinary = env::current_exe()
+            .expect("failed to get current executable path")
+            .display()
+            .to_string();
+        let mut child = Command::new(ownbinary)
+            .arg("benchmark-worker")
+            .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("failed to start benchmark process");
 
-        let (process_tx, process_rx) = ipc_channel::ipc::channel::<ProgressUpdate>().unwrap();
-        let benchmark_process = tokio::task::spawn_blocking(move || {
-            let mut benchmark_results = BenchmarkResults::init_empty(&config.model);
-            let mut model =
-                LLModelExtractor::new(Path::new(&config.model), config.num_gpu_layers, max_ctx)
-                    .expect("Language model is required to load for benchmarking its performance");
+        let mut stdin = child.stdin.take().expect("failed to open stdin");
+        let benchmark_run_data = serde_json::to_string(&BenchmarkWorkerData {
+            config,
+            doc_to_process,
+            custom_fields,
+            crrspndents,
+        })
+        .unwrap();
+        let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
+        let _ = stdin.write_all(b"\n").await;
+        let _ = stdin.flush().await;
 
-            // Send start notification
-            let _ = process_tx.send(ProgressUpdate::Started {
-                model_name: config.model.clone(),
-                total_docs: doc_to_process.len(),
-            });
+        let stdout = child.stdout.take().expect("failed to open stdout");
+        let mut stdout_reader = BufReader::new(stdout).lines();
 
-            for (i, doc) in doc_to_process.iter().enumerate() {
-                run_benchmark_for_document(
-                    &mut model,
-                    doc,
-                    &custom_fields,
-                    &crrspndents,
-                    &mut benchmark_results,
-                    None,
-                    i,
-                    doc_to_process.len(),
-                );
-            }
+        let shared_suprocess_running_flag = Arc::new(RwLock::new(true));
+        let shared_suprocess_running_flag_2 = shared_running_flag.clone();
+        let shared_running_flag_2 = shared_running_flag.clone();
 
-            // Send completion notification
-            let _ = process_tx.send(ProgressUpdate::BenchmarkResults {
-                model_name: config.model.clone(),
-                results: benchmark_results.clone(),
-            });
-        });
-
-        let process_updates_mapper = async || {
-            while true {
-                if let Ok(message) = process_rx.recv() {
-                    if let Some(ui_update_channel) = &progress_sender {
-                        ui_update_channel.send(message);
+        let process_receiver = tokio::spawn(async move {
+            while let Ok(maybe_line) = stdout_reader.next_line().await
+                && *shared_running_flag.read().await
+                && *shared_suprocess_running_flag_2.read().await
+            {
+                if let Some(progress_channel) = progress_sender.as_mut()
+                    && let Some(line) = maybe_line
+                {
+                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                        let _ = progress_channel.send(update);
                     }
                 }
             }
-        };
+        });
 
-        let _ = tokio::join!(benchmark_process, process_updates_mapper());
+        let process_watchdog = tokio::spawn(async move {
+            let mut kill_subprocess = false;
+            while *shared_suprocess_running_flag.read().await {
+                if kill_subprocess {
+                    let _ = child.kill().await;
+                    break;
+                }
+                let mut delay = Delay::new(Duration::from_millis(500)).fuse();
+                let mut child_finished = child.wait().boxed().fuse();
+                select! {
+                    _ = delay => {
+                        if *shared_running_flag_2.read().await == false {
+                            kill_subprocess = true;
+                        }
+                    }
+                    _subprocess_finishd = child_finished => {
+                        *shared_suprocess_running_flag.write().await = false;
+                    }
+                }
+            }
+        });
+
+        let _ = tokio::join!(process_receiver, process_watchdog);
     }
 }
