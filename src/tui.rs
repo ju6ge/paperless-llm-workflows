@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, process, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{select, FutureExt, StreamExt};

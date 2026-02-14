@@ -496,7 +496,7 @@ fn run_benchmark_for_document(
 
     // Send progress update
     if log_to_stdio {
-        writeln!(
+        let _ = writeln!(
             std::io::stdout(),
             "{}",
             serde_json::to_string(&ProgressUpdate::DocumentProgress {
@@ -515,7 +515,7 @@ fn run_benchmark_for_document(
 
     // Send stats update
     if log_to_stdio {
-        writeln!(
+        let _ = writeln!(
             std::io::stdout(),
             "{}",
             serde_json::to_string(&ProgressUpdate::DocumentProgress {
@@ -678,7 +678,7 @@ struct BenchmarkWorkerData {
 /// benchmarking multiple models in parallell requires multiple instances of llama.cpp. This is only possible when running llama.cpp in multiple isolated processes
 pub(crate) fn benchmark_worker() {
     let mut benchmark_job_str = String::new();
-    std::io::stdin().read_line(&mut benchmark_job_str);
+    let _ = std::io::stdin().read_line(&mut benchmark_job_str);
     let benchmark_job_data: BenchmarkWorkerData = serde_json::from_str(&benchmark_job_str).unwrap();
 
     let max_ctx = if benchmark_job_data.config.max_ctx == 0 {
@@ -696,7 +696,7 @@ pub(crate) fn benchmark_worker() {
     .expect("Language model is required to load for benchmarking its performance");
 
     // Send start notification
-    writeln!(
+    let _ = writeln!(
         std::io::stdout(),
         "{}",
         serde_json::to_string(&ProgressUpdate::Started {
@@ -720,7 +720,7 @@ pub(crate) fn benchmark_worker() {
     }
 
     // Send completion notification
-    writeln!(
+    let _ = writeln!(
         std::io::stdout(),
         "{}",
         serde_json::to_string(&ProgressUpdate::BenchmarkResults {

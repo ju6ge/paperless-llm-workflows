@@ -134,7 +134,8 @@ async fn async_main() {
             exit(0);
         }
         Action::BenchmarkWorker => {
-            tokio::task::spawn_blocking(benchmark::benchmark_worker).await;
+            let _ = tokio::task::spawn_blocking(benchmark::benchmark_worker).await;
+            exit(0);
         }
         Action::Benchmark(benchmark_parameters) => {
             benchmark_parameters.run_tui(config).await;
