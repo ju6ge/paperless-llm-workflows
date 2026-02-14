@@ -1,38 +1,66 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, iter::zip, sync::Arc};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use futures::{select, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, select};
 use futures_timer::Delay;
 use itertools::Itertools;
 use ratatui::{
-    layout::{Layout, Constraint}, style::Stylize, text::Line, widgets::{Block, Paragraph}, DefaultTerminal, Frame,
+    DefaultTerminal, Frame,
+    layout::{Constraint, Layout, Rect},
+    style::Stylize,
+    text::Line,
+    widgets::{Block, Gauge, Paragraph},
 };
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{Duration};
+use tokio::time::Duration;
 
-use crate::benchmark::ProgressUpdate;
+use crate::benchmark::{BenchmarkResults, ProgressUpdate};
 
-#[derive(Debug)]
-struct BenchmarkState {
-    
+#[derive(Debug, Clone)]
+enum BenchmarkState {
+    Pending,
+    Running,
+    Finished,
+}
+
+#[derive(Debug, Clone)]
+struct BenchmarkRunData {
+    state: BenchmarkState,
+    result: Option<BenchmarkResults>,
+    finished_docs: usize,
+    total_docs: usize,
+}
+
+impl BenchmarkRunData {
+    fn new(total_docs: usize) -> Self {
+        Self {
+            state: BenchmarkState::Pending,
+            result: None,
+            finished_docs: 0,
+            total_docs,
+        }
+    }
 }
 
 pub(crate) struct BenchmarkApp {
     running: Arc<tokio::sync::RwLock<bool>>,
     benchmarking_update_channel: Mutex<tokio::sync::mpsc::UnboundedReceiver<ProgressUpdate>>,
     event_stream: Mutex<EventStream>,
-    benchmark_progress: tokio::sync::RwLock<BTreeMap<String, BenchmarkState>>,
+    benchmark_progress: tokio::sync::RwLock<BTreeMap<String, BenchmarkRunData>>,
     log_messages: tokio::sync::RwLock<Vec<ProgressUpdate>>,
 }
 
 impl BenchmarkApp {
-    pub fn new(shared_running_flag: Arc<tokio::sync::RwLock<bool>>, update_channel: tokio::sync::mpsc::UnboundedReceiver<ProgressUpdate>) -> Self {
+    pub fn new(
+        shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
+        update_channel: tokio::sync::mpsc::UnboundedReceiver<ProgressUpdate>,
+    ) -> Self {
         Self {
             running: shared_running_flag,
             benchmarking_update_channel: Mutex::new(update_channel),
             event_stream: Default::default(),
             benchmark_progress: RwLock::new(BTreeMap::new()),
-            log_messages: RwLock::new(Vec::new())
+            log_messages: RwLock::new(Vec::new()),
         }
     }
 
@@ -40,6 +68,44 @@ impl BenchmarkApp {
     async fn handle_benchmarking_updates(&self) {
         let mut update_channel = self.benchmarking_update_channel.lock().await;
         if let Ok(process_update) = (*update_channel).try_recv() {
+            match &process_update {
+                ProgressUpdate::Register {
+                    model_name,
+                    total_docs,
+                } => {
+                    let mut progress = self.benchmark_progress.write().await;
+                    (*progress).insert(model_name.to_string(), BenchmarkRunData::new(*total_docs));
+                }
+                ProgressUpdate::Started { model_name, .. } => {
+                    let mut progress = self.benchmark_progress.write().await;
+                    if let Some(benchmark_data) = progress.get_mut(model_name) {
+                        benchmark_data.state = BenchmarkState::Running
+                    }
+                }
+                ProgressUpdate::DocumentProgress {
+                    model_name,
+                    progress,
+                    ..
+                } => {
+                    let mut progress_data = self.benchmark_progress.write().await;
+                    if let Some(benchmark_data) = progress_data.get_mut(model_name) {
+                        benchmark_data.finished_docs = *progress;
+                        if benchmark_data.finished_docs == benchmark_data.total_docs {
+                            benchmark_data.state = BenchmarkState::Finished;
+                        }
+                    }
+                }
+                ProgressUpdate::BenchmarkResults {
+                    model_name,
+                    results,
+                } => {
+                    let mut progress_data = self.benchmark_progress.write().await;
+                    if let Some(benchmark_data) = progress_data.get_mut(model_name) {
+                        benchmark_data.result = Some(results.clone())
+                    }
+                }
+                ProgressUpdate::Error { .. } => { /* nothing to do here */ }
+            }
             let mut log_messages = self.log_messages.write().await;
             log_messages.push(process_update);
         }
@@ -50,7 +116,8 @@ impl BenchmarkApp {
         while *self.running.read().await {
             self.handle_benchmarking_updates().await;
             let log = self.log_messages.read().await.clone();
-            terminal.draw(|frame| self.draw(frame, &log))?;
+            let benchmark_state = (*self.benchmark_progress.read().await).clone();
+            terminal.draw(|frame| self.draw(frame, &log, &benchmark_state))?;
             self.handle_crossterm_events().await?;
         }
         Ok(())
@@ -61,7 +128,12 @@ impl BenchmarkApp {
     /// This is where you add new widgets. See the following resources for more information:
     /// - <https://docs.rs/ratatui/latest/ratatui/widgets/index.html>
     /// - <https://github.com/ratatui/ratatui/tree/master/examples>
-    fn draw(&self, frame: &mut Frame, log_messages: &Vec<ProgressUpdate>) {
+    fn draw(
+        &self,
+        frame: &mut Frame,
+        log_messages: &Vec<ProgressUpdate>,
+        benchmark_state: &BTreeMap<String, BenchmarkRunData>,
+    ) {
         use Constraint::{Fill, Length, Min};
         let title = Line::from("Paperless LLM Workflows Benchmark Status")
             .bold()
@@ -70,12 +142,18 @@ impl BenchmarkApp {
         let text = "\n\
             \n\
             Press `Esc`, `Ctrl-C` or `q` to stop running.";
-        let log = format!("LOG:\n{}", log_messages.iter().map(|m| format!("{:?}",m)).join("\n-"));
+        let log = format!(
+            "LOG:\n{}",
+            log_messages.iter().map(|m| format!("{:?}", m)).join("\n-")
+        );
 
         let vertical = Layout::vertical([Length(6), Min(0)]);
-        let [ title_area, content_area ] = vertical.areas(frame.area());
+        let [title_area, content_area] = vertical.areas(frame.area());
         let horizontal = Layout::horizontal([Fill(1); 2]);
-        let [ info_area, log_area ] = horizontal.areas(content_area);
+        let [info_area, log_area] = horizontal.areas(content_area);
+        let benchmark_size: u16 = ((benchmark_state.keys().len())*2 + 2) as u16;
+        let infos = Layout::vertical([Length(benchmark_size)]);
+        let [progress_area] = infos.areas(info_area);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::bordered().title(title))
@@ -83,11 +161,10 @@ impl BenchmarkApp {
             title_area,
         );
         frame.render_widget(
-            Paragraph::new(log)
-                .block(Block::bordered())
-                .centered(),
+            Paragraph::new(log).block(Block::bordered()).centered(),
             log_area,
         );
+        render_progess_bars(frame, benchmark_state, progress_area);
     }
 
     /// Reads the crossterm events and updates the state of [`App`].
@@ -116,9 +193,7 @@ impl BenchmarkApp {
     async fn on_key_event(&self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc | KeyCode::Char('q'))
-            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => {
-                self.quit().await
-            },
+            | (KeyModifiers::CONTROL, KeyCode::Char('c') | KeyCode::Char('C')) => self.quit().await,
             // Add other key handlers here.
             _ => {}
         }
@@ -128,5 +203,54 @@ impl BenchmarkApp {
     async fn quit(&self) {
         let mut running = self.running.write().await;
         *running = false;
+    }
+}
+
+fn render_progess_bars(
+    frame: &mut Frame,
+    benchmark_state: &BTreeMap<String, BenchmarkRunData>,
+    area: Rect,
+) {
+    use Constraint::Length;
+    let progress_block = Block::bordered().title("Benchmark Progress");
+    let progress_inner = progress_block.inner(area);
+    let amount_bars = if benchmark_state.keys().len() > 1 {
+        benchmark_state.keys().len() + 1
+    } else {
+        1
+    };
+    let bar_layout =
+        Layout::vertical(vec![Length(2); amount_bars]).flex(ratatui::layout::Flex::Center);
+    let bar_areas = bar_layout.split(progress_inner);
+    frame.render_widget(progress_block, area);
+    if benchmark_state.keys().len() > 1 {
+        let total_docs: usize = benchmark_state.values().map(|d| d.total_docs).sum();
+        let finished_docs: usize = benchmark_state.values().map(|d| d.finished_docs).sum();
+        frame.render_widget(
+            Gauge::default()
+                .block(Block::new().title("Overall"))
+                .label(format!(" {}/{}", finished_docs, total_docs))
+                .ratio(finished_docs as f64 / total_docs as f64),
+            bar_areas[0]
+        );
+        for ((model_name, data), area) in zip(benchmark_state.iter(), bar_areas[1..].iter()) {
+            frame.render_widget(
+                Gauge::default()
+                    .block(Block::new().title(model_name.as_str()))
+                    .label(format!(" {}/{}", data.finished_docs, data.total_docs))
+                    .ratio(data.finished_docs as f64 / data.total_docs as f64),
+                *area,
+            );
+        }
+    } else {
+        for ((model_name, data), area) in zip(benchmark_state.iter(), bar_areas.iter()) {
+            frame.render_widget(
+                Gauge::default()
+                    .block(Block::new().title(model_name.as_str()))
+                    .label(format!(" {}/{}", data.finished_docs, data.total_docs))
+                    .ratio(data.finished_docs as f64 / data.total_docs as f64),
+                *area,
+            );
+        }
     }
 }

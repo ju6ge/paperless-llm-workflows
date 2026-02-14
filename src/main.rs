@@ -142,7 +142,7 @@ async fn async_main() {
             exit(0);
         }
         Action::MultiBenchmark(multi_benchmark_parameters) => {
-            multi_benchmark_parameters.run(config).await;
+            multi_benchmark_parameters.run_tui(config).await;
             exit(0);
         }
         Action::Server => { /* keep going other option stop execution after completion */ }

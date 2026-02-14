@@ -1,10 +1,10 @@
-use std::{env, fs::OpenOptions, io::Write, path::Path, sync::{Arc}};
+use std::{env, fs::OpenOptions, io::Write, path::Path, sync::Arc};
 
-use futures::{select, FutureExt};
+use futures::{FutureExt, select};
 use futures_timer::Delay;
 use paperless_api_client::{
-    Client,
-    types::{Correspondent, CustomField, Document},
+    Client, custom_fields,
+    types::{Correspondent, CustomField, Document, Tag},
 };
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
@@ -191,6 +191,7 @@ pub(crate) enum ProgressUpdate {
     },
     /// current benchmark progress update
     DocumentProgress {
+        model_name: String,
         doc_id: i64,
         progress: usize,
         total: usize,
@@ -201,10 +202,7 @@ pub(crate) enum ProgressUpdate {
         results: BenchmarkResults,
     },
     /// error report
-    Error {
-        model_name: String,
-        error: String,
-    },
+    Error { model_name: String, error: String },
 }
 
 struct BenchmarkContext<'a> {
@@ -489,6 +487,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
 }
 
 fn run_benchmark_for_document(
+    model_name: &String,
     model: &mut LLModelExtractor,
     doc: &Document,
     custom_fields: &Vec<CustomField>,
@@ -506,20 +505,6 @@ fn run_benchmark_for_document(
         results,
     };
 
-    // Send progress update
-    if log_to_stdio {
-        let _ = writeln!(
-            std::io::stdout(),
-            "{}",
-            serde_json::to_string(&ProgressUpdate::DocumentProgress {
-                doc_id: doc.id,
-                progress: doc_index,
-                total: total_docs,
-            })
-            .unwrap()
-        );
-    }
-
     // Run all benchmark types
     run_custom_field_benchmark(&mut ctx);
     run_correspondent_suggest_benchmark(&mut ctx);
@@ -531,6 +516,7 @@ fn run_benchmark_for_document(
             std::io::stdout(),
             "{}",
             serde_json::to_string(&ProgressUpdate::DocumentProgress {
+                model_name: model_name.to_string(),
                 doc_id: doc.id,
                 progress: doc_index + 1,
                 total: total_docs,
@@ -541,7 +527,7 @@ fn run_benchmark_for_document(
 }
 
 impl MultiBenchmarkParameters {
-    pub async fn run(&self, config: Config) {
+    pub async fn run_tui(&self, config: Config) {
         use std::fs;
         use walkdir::WalkDir;
 
@@ -574,80 +560,15 @@ impl MultiBenchmarkParameters {
             return;
         }
 
-        println!("Found {} model(s) to benchmark", model_files.len());
+        let (custom_fields, crrspndents, doc_to_process) =
+            get_benchmark_data_from_paperless_instance(
+                &config,
+                &self.verified_docs_tag,
+                &self.sample_doc_size,
+            )
+            .await;
 
-        // Prepare benchmark configuration
-        let benchmark_config = BenchmarkConfig {
-            verified_docs_tag: self.verified_docs_tag.clone(),
-            sample_doc_size: self.sample_doc_size,
-        };
-
-        // Run benchmarks in parallel
-        let mut handles = Vec::new();
-        let model_files_arc = Arc::new(model_files);
-        let output_dir_arc = Arc::new(self.output_directory.clone());
-        let config_arc = Arc::new(config);
-        let benchmark_config_arc = Arc::new(benchmark_config);
-
-        // Pre-compute result names for all models
-        let result_names: Vec<String> = model_files_arc
-            .iter()
-            .map(|model_file| self.filename_to_result_name(model_file))
-            .collect();
-
-        for (i, model_file) in model_files_arc.iter().enumerate() {
-            let model_file = model_file.clone();
-            let output_dir = output_dir_arc.clone();
-            let config = config_arc.clone();
-            let benchmark_config = benchmark_config_arc.clone();
-            let result_name = result_names[i].clone();
-
-            // Spawn benchmark task
-            let handle = tokio::spawn(async move {
-                let result_file = format!("{}/{}_results.json", output_dir, result_name);
-
-                println!(
-                    "Starting benchmark {}: {} -> {}",
-                    i + 1,
-                    model_file.display(),
-                    result_file
-                );
-
-                let mut config_copy = (*config).clone();
-                config_copy.model = model_file.to_string_lossy().into_owned();
-
-                let params = BenchmarkParameters {
-                    verified_docs_tag: benchmark_config.verified_docs_tag.clone(),
-                    sample_doc_size: benchmark_config.sample_doc_size,
-                    result_file: Some(result_file),
-                    view: false,
-                };
-
-                //params.run_with_progress(config_copy, None).await;
-            });
-
-            handles.push(handle);
-
-            // Limit concurrent jobs
-            if handles.len() >= self.jobs {
-                // Wait for one job to complete
-                let handle = handles.pop().unwrap();
-                let result = handle.await;
-                if let Err(e) = result {
-                    eprintln!("Benchmark failed: {}", e);
-                }
-            }
-        }
-
-        // Wait for remaining jobs
-        for handle in handles {
-            let result = handle.await;
-            if let Err(e) = result {
-                eprintln!("Benchmark failed: {}", e);
-            }
-        }
-
-        println!("All benchmarks completed!");
+        // TODO
     }
 
     fn filename_to_result_name(&self, path: &Path) -> String {
@@ -720,6 +641,7 @@ pub(crate) fn benchmark_worker() {
 
     for (i, doc) in benchmark_job_data.doc_to_process.iter().enumerate() {
         run_benchmark_for_document(
+            &benchmark_job_data.config.model,
             &mut model,
             doc,
             &benchmark_job_data.custom_fields,
@@ -741,6 +663,49 @@ pub(crate) fn benchmark_worker() {
         })
         .unwrap()
     );
+}
+
+async fn get_benchmark_data_from_paperless_instance(
+    config: &Config,
+    verified_docs_tag: &Option<String>,
+    sample_size: &Option<usize>,
+) -> (
+    Vec<CustomField>,
+    Vec<Correspondent>,
+    Vec<Document>,
+) {
+    let mut api_client = Client::new_from_env();
+    api_client.set_base_url(&config.paperless_server);
+
+    let tags = requests::get_all_tags(&mut api_client).await;
+    let custom_fields = requests::get_all_custom_fields(&mut api_client).await;
+    let crrspndents = requests::fetch_all_correspondents(&mut api_client).await;
+    let mut doc_to_process = requests::get_all_docs(&mut api_client)
+        .await
+        .into_iter()
+        .filter(|doc| {
+            if let Some(verified_tag_name) = verified_docs_tag
+                && let Some(verified_tag) = tags.iter().find(|tag| tag.name == *verified_tag_name)
+            {
+                doc.tags.contains(&verified_tag.id)
+            } else {
+                // verified tag unspecified or does not exist falling back to use all docs without inbox tags
+                tags.iter()
+                    // filter tags to only the ones of the document
+                    .filter(|tag| doc.tags.contains(&tag.id))
+                    // check to find if any of the tags is an inbox tag
+                    .find(|tag| tag.is_inbox_tag.is_some_and(|inbox| inbox))
+                    // if no tag is found, the document can be used for benchmarking
+                    .is_none()
+            }
+        })
+        .collect::<Vec<_>>();
+    if let Some(sample_size) = sample_size {
+        doc_to_process = doc_to_process
+            .into_iter()
+            .choose_multiple(&mut rng(), *sample_size);
+    }
+    (custom_fields, crrspndents, doc_to_process)
 }
 
 impl BenchmarkParameters {
@@ -774,37 +739,18 @@ impl BenchmarkParameters {
         mut progress_sender: Option<tokio::sync::mpsc::UnboundedSender<ProgressUpdate>>,
         shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     ) {
-        let mut api_client = Client::new_from_env();
-        api_client.set_base_url(&config.paperless_server);
-
-        let tags = requests::get_all_tags(&mut api_client).await;
-        let custom_fields = requests::get_all_custom_fields(&mut api_client).await;
-        let crrspndents = requests::fetch_all_correspondents(&mut api_client).await;
-        let mut doc_to_process = requests::get_all_docs(&mut api_client)
-            .await
-            .into_iter()
-            .filter(|doc| {
-                if let Some(verified_tag_name) = &self.verified_docs_tag
-                    && let Some(verified_tag) =
-                        tags.iter().find(|tag| tag.name == *verified_tag_name)
-                {
-                    doc.tags.contains(&verified_tag.id)
-                } else {
-                    // verified tag unspecified or does not exist falling back to use all docs without inbox tags
-                    tags.iter()
-                        // filter tags to only the ones of the document
-                        .filter(|tag| doc.tags.contains(&tag.id))
-                        // check to find if any of the tags is an inbox tag
-                        .find(|tag| tag.is_inbox_tag.is_some_and(|inbox| inbox))
-                        // if no tag is found, the document can be used for benchmarking
-                        .is_none()
-                }
-            })
-            .collect::<Vec<_>>();
-        if let Some(sample_size) = self.sample_doc_size {
-            doc_to_process = doc_to_process
-                .into_iter()
-                .choose_multiple(&mut rng(), sample_size);
+        let (custom_fields, crrspndents, doc_to_process) =
+            get_benchmark_data_from_paperless_instance(
+                &config,
+                &self.verified_docs_tag,
+                &self.sample_doc_size,
+            )
+            .await;
+        if let Some(progress_channel) = progress_sender.as_mut() {
+            let _ = progress_channel.send(ProgressUpdate::Register {
+                model_name: config.model.clone(),
+                total_docs: doc_to_process.len(),
+            });
         }
 
         let ownbinary = env::current_exe()
