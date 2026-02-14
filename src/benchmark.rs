@@ -176,19 +176,31 @@ impl BenchmarkResults {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub(crate) enum ProgressUpdate {
+    /// register benchmark run with model
+    ///
+    /// depending on the amount of parallel benchmark runs not all benchmarks will be running at the same time
+    /// so in order for the benchmark ui to know how many results to expect each future run is registered at the beginning
+    Register {
+        model_name: String,
+        total_docs: usize,
+    },
+    /// benchmark subprocess for model has started
     Started {
         model_name: String,
         total_docs: usize,
     },
+    /// current benchmark progress update
     DocumentProgress {
         doc_id: i64,
         progress: usize,
         total: usize,
     },
+    /// intermediary or final benchmark result state
     BenchmarkResults {
         model_name: String,
         results: BenchmarkResults,
     },
+    /// error report
     Error {
         model_name: String,
         error: String,
