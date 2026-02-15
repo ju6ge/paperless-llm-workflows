@@ -1,10 +1,16 @@
-use std::{env, fs::OpenOptions, io::Write, path::Path, sync::Arc};
+use std::{
+    env,
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use futures::{FutureExt, select};
 use futures_timer::Delay;
 use paperless_api_client::{
-    Client, custom_fields,
-    types::{Correspondent, CustomField, Document, Tag},
+    Client,
+    types::{Correspondent, CustomField, Document},
 };
 use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
@@ -527,6 +533,106 @@ fn run_benchmark_for_document(
 }
 
 impl MultiBenchmarkParameters {
+    async fn start_benchmark_worker(
+        &self,
+        config: Config,
+        doc_to_process: Vec<Document>,
+        custom_fields: Vec<CustomField>,
+        crrspndents: Vec<Correspondent>,
+        _model_name: String,
+        result_path: PathBuf,
+        progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
+        shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let ownbinary = env::current_exe()
+            .expect("failed to get current executable path")
+            .display()
+            .to_string();
+        let mut child = Command::new(ownbinary)
+            .arg("benchmark-worker")
+            .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("failed to start benchmark process");
+
+        let mut stdin = child.stdin.take().expect("failed to open stdin");
+        let benchmark_run_data = serde_json::to_string(&BenchmarkWorkerData {
+            config,
+            doc_to_process,
+            custom_fields,
+            crrspndents,
+        })
+        .unwrap();
+        let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
+        let _ = stdin.write_all(b"\n").await;
+        let _ = stdin.flush().await;
+
+        let stdout = child.stdout.take().expect("failed to open stdout");
+        let mut stdout_reader = BufReader::new(stdout).lines();
+
+        let shared_suprocess_running_flag = Arc::new(RwLock::new(true));
+        let shared_suprocess_running_flag_2 = shared_running_flag.clone();
+        let shared_running_flag_2 = shared_running_flag.clone();
+        let progress_sender_clone = progress_sender.clone();
+        let result_path_clone = result_path.clone();
+
+        let process_receiver = tokio::spawn(async move {
+            let mut results_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&result_path_clone)
+                .expect("Failed to create results file");
+
+            while let Ok(maybe_line) = stdout_reader.next_line().await
+                && *shared_running_flag.read().await
+                && *shared_suprocess_running_flag_2.read().await
+            {
+                if let Some(line) = maybe_line {
+                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                        let _ = progress_sender_clone.send(update.clone());
+
+                        // Save results to file when we receive BenchmarkResults update
+                        if let ProgressUpdate::BenchmarkResults { results, .. } = update {
+                            let _ = serde_json::to_writer(&mut results_file, &results)
+                                .expect("Failed to write results to file");
+                            let _ = results_file
+                                .sync_all()
+                                .expect("Failed to sync results file");
+                        }
+                    }
+                }
+            }
+        });
+
+        let process_watchdog = tokio::spawn(async move {
+            let mut kill_subprocess = false;
+            while *shared_suprocess_running_flag.read().await {
+                if kill_subprocess {
+                    let _ = child.kill().await;
+                    break;
+                }
+                let mut delay = Delay::new(Duration::from_millis(500)).fuse();
+                let mut child_finished = child.wait().boxed().fuse();
+                select! {
+                    _ = delay => {
+                        if *shared_running_flag_2.read().await == false {
+                            kill_subprocess = true;
+                        }
+                    }
+                    _subprocess_finished = child_finished => {
+                        *shared_suprocess_running_flag.write().await = false;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
+            let _ = tokio::join!(process_receiver, process_watchdog);
+        })
+    }
+
     pub async fn run_tui(&self, config: Config) {
         use std::fs;
         use walkdir::WalkDir;
@@ -568,7 +674,71 @@ impl MultiBenchmarkParameters {
             )
             .await;
 
-        // TODO
+        // Initialize TUI for multi-benchmark
+        let shared_running_flag = Arc::new(tokio::sync::RwLock::new(true));
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let terminal = ratatui::init();
+        let tui = BenchmarkApp::new(shared_running_flag.clone(), rx).run(terminal);
+
+        // Start benchmark processes for each model
+        // Note: jobs parameter limits parallel subprocesses, but each model processes ALL documents
+        let mut handles = Vec::new();
+        let mut all_results = Vec::new();
+
+        for model_file in &model_files {
+            let model_name = self.filename_to_result_name(model_file);
+            let result_path =
+                Path::new(&self.output_directory).join(format!("{}.json", model_name));
+
+            // Create config for this model
+            let mut model_config = config.clone();
+            model_config.model = model_file.to_string_lossy().to_string();
+
+            // Each model processes ALL documents
+            let docs_for_model = doc_to_process.clone();
+
+            // Send register update for TUI
+            let _ = tx.send(ProgressUpdate::Register {
+                model_name: model_name.clone(),
+                total_docs: docs_for_model.len(),
+            });
+
+            // Start benchmark worker
+            let handle = self.start_benchmark_worker(
+                model_config,
+                docs_for_model,
+                custom_fields.clone(),
+                crrspndents.clone(),
+                model_name.clone(),
+                result_path.clone(),
+                tx.clone(),
+                shared_running_flag.clone(),
+            );
+
+            handles.push(handle);
+            all_results.push((model_name, result_path));
+        }
+
+        // Wait for all benchmarks to complete
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        // Wait for TUI to finish
+        let _ = tui.await;
+        ratatui::restore();
+
+        // Display summary of all results
+        for (model_name, result_path) in all_results {
+            if let Ok(results_file) = std::fs::File::open(&result_path) {
+                let benchmark_results: Result<BenchmarkResults, _> =
+                    serde_json::from_reader(results_file);
+                if let Ok(results) = benchmark_results {
+                    println!("\n=== Results for {} ===", model_name);
+                    results.display_results();
+                }
+            }
+        }
     }
 
     fn filename_to_result_name(&self, path: &Path) -> String {
@@ -669,11 +839,7 @@ async fn get_benchmark_data_from_paperless_instance(
     config: &Config,
     verified_docs_tag: &Option<String>,
     sample_size: &Option<usize>,
-) -> (
-    Vec<CustomField>,
-    Vec<Correspondent>,
-    Vec<Document>,
-) {
+) -> (Vec<CustomField>, Vec<Correspondent>, Vec<Document>) {
     let mut api_client = Client::new_from_env();
     api_client.set_base_url(&config.paperless_server);
 
