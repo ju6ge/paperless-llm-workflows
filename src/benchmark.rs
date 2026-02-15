@@ -534,7 +534,6 @@ fn run_benchmark_for_document(
 
 impl MultiBenchmarkParameters {
     async fn start_benchmark_worker(
-        &self,
         config: Config,
         doc_to_process: Vec<Document>,
         custom_fields: Vec<CustomField>,
@@ -684,6 +683,7 @@ impl MultiBenchmarkParameters {
         // Note: jobs parameter limits parallel subprocesses, but each model processes ALL documents
         let mut handles = Vec::new();
         let mut all_results = Vec::new();
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.jobs));
 
         for model_file in &model_files {
             let model_name = self.filename_to_result_name(model_file);
@@ -698,22 +698,34 @@ impl MultiBenchmarkParameters {
             let docs_for_model = doc_to_process.clone();
 
             // Send register update for TUI
-            let _ = tx.send(ProgressUpdate::Register {
+            let tx_clone = tx.clone();
+            let _ = tx_clone.send(ProgressUpdate::Register {
                 model_name: model_name.clone(),
                 total_docs: docs_for_model.len(),
             });
 
-            // Start benchmark worker
-            let handle = self.start_benchmark_worker(
-                model_config,
-                docs_for_model,
-                custom_fields.clone(),
-                crrspndents.clone(),
-                model_name.clone(),
-                result_path.clone(),
-                tx.clone(),
-                shared_running_flag.clone(),
-            );
+            // Start benchmark worker with semaphore
+            let semaphore_clone = semaphore.clone();
+            let custom_fields_clone = custom_fields.clone();
+            let crrspndents_clone = crrspndents.clone();
+            let shared_running_flag_clone = shared_running_flag.clone();
+            let model_name_clone = model_name.clone();
+            let result_path_clone = result_path.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = semaphore_clone.acquire().await;
+                Self::start_benchmark_worker(
+                    model_config,
+                    docs_for_model,
+                    custom_fields_clone,
+                    crrspndents_clone,
+                    model_name_clone,
+                    result_path_clone,
+                    tx_clone,
+                    shared_running_flag_clone,
+                )
+                .await
+            });
 
             handles.push(handle);
             all_results.push((model_name, result_path));
