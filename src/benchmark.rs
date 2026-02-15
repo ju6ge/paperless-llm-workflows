@@ -532,106 +532,116 @@ fn run_benchmark_for_document(
     }
 }
 
-impl MultiBenchmarkParameters {
-    async fn start_benchmark_worker(
-        config: Config,
-        doc_to_process: Vec<Document>,
-        custom_fields: Vec<CustomField>,
-        crrspndents: Vec<Correspondent>,
-        _model_name: String,
-        result_path: PathBuf,
-        progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
-        shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
-    ) -> tokio::task::JoinHandle<()> {
-        let ownbinary = env::current_exe()
-            .expect("failed to get current executable path")
-            .display()
-            .to_string();
-        let mut child = Command::new(ownbinary)
-            .arg("benchmark-worker")
-            .stdout(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("failed to start benchmark process");
+#[derive(Debug, Serialize, Deserialize)]
+struct BenchmarkWorkerData {
+    config: Config,
+    doc_to_process: Vec<Document>,
+    custom_fields: Vec<CustomField>,
+    crrspndents: Vec<Correspondent>,
+}
 
-        let mut stdin = child.stdin.take().expect("failed to open stdin");
-        let benchmark_run_data = serde_json::to_string(&BenchmarkWorkerData {
-            config,
-            doc_to_process,
-            custom_fields,
-            crrspndents,
-        })
-        .unwrap();
-        let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
-        let _ = stdin.write_all(b"\n").await;
-        let _ = stdin.flush().await;
+/// Helper method to manage benchmark subprocess and handle progress updates
+/// Returns a JoinHandle to the process management task
+async fn start_benchmark_subprocess(
+    config: Config,
+    doc_to_process: Vec<Document>,
+    custom_fields: Vec<CustomField>,
+    crrspndents: Vec<Correspondent>,
+    progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
+    shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
+    result_path: Option<PathBuf>,
+) -> tokio::task::JoinHandle<()> {
+    let ownbinary = env::current_exe()
+        .expect("failed to get current executable path")
+        .display()
+        .to_string();
+    let mut child = Command::new(ownbinary)
+        .arg("benchmark-worker")
+        .stdout(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("failed to start benchmark process");
 
-        let stdout = child.stdout.take().expect("failed to open stdout");
-        let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stdin = child.stdin.take().expect("failed to open stdin");
+    let benchmark_run_data = serde_json::to_string(&BenchmarkWorkerData {
+        config,
+        doc_to_process,
+        custom_fields,
+        crrspndents,
+    })
+    .unwrap();
+    let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
+    let _ = stdin.write_all(b"\n").await;
+    let _ = stdin.flush().await;
 
-        let shared_suprocess_running_flag = Arc::new(RwLock::new(true));
-        let shared_suprocess_running_flag_2 = shared_running_flag.clone();
-        let shared_running_flag_2 = shared_running_flag.clone();
-        let progress_sender_clone = progress_sender.clone();
-        let result_path_clone = result_path.clone();
+    let stdout = child.stdout.take().expect("failed to open stdout");
+    let mut stdout_reader = BufReader::new(stdout).lines();
 
-        let process_receiver = tokio::spawn(async move {
-            let mut results_file = OpenOptions::new()
+    let shared_suprocess_running_flag = Arc::new(RwLock::new(true));
+    let shared_suprocess_running_flag_2 = shared_running_flag.clone();
+    let shared_running_flag_2 = shared_running_flag.clone();
+    let progress_sender_clone = progress_sender.clone();
+
+    let process_receiver = tokio::spawn(async move {
+        let mut results_file: Option<std::fs::File> = result_path.map(|path| {
+            OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(&result_path_clone)
-                .expect("Failed to create results file");
+                .open(&path)
+                .expect("Failed to create results file")
+        });
 
-            while let Ok(maybe_line) = stdout_reader.next_line().await
-                && *shared_running_flag.read().await
-                && *shared_suprocess_running_flag_2.read().await
-            {
-                if let Some(line) = maybe_line {
-                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&line) {
-                        let _ = progress_sender_clone.send(update.clone());
+        while let Ok(maybe_line) = stdout_reader.next_line().await
+            && *shared_running_flag.read().await
+            && *shared_suprocess_running_flag_2.read().await
+        {
+            if let Some(line) = maybe_line {
+                if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                    let _ = progress_sender_clone.send(update.clone());
 
-                        // Save results to file when we receive BenchmarkResults update
-                        if let ProgressUpdate::BenchmarkResults { results, .. } = update {
-                            let _ = serde_json::to_writer(&mut results_file, &results)
+                    // Save results to file when we receive BenchmarkResults update (if result_path is provided)
+                    if let ProgressUpdate::BenchmarkResults { results, .. } = update {
+                        if let Some(ref mut file) = results_file {
+                            let _ = serde_json::to_writer(&mut *file, &results)
                                 .expect("Failed to write results to file");
-                            let _ = results_file
-                                .sync_all()
-                                .expect("Failed to sync results file");
+                            let _ = file.sync_all().expect("Failed to sync results file");
                         }
                     }
                 }
             }
-        });
+        }
+    });
 
-        let process_watchdog = tokio::spawn(async move {
-            let mut kill_subprocess = false;
-            while *shared_suprocess_running_flag.read().await {
-                if kill_subprocess {
-                    let _ = child.kill().await;
-                    break;
+    let process_watchdog = tokio::spawn(async move {
+        let mut kill_subprocess = false;
+        while *shared_suprocess_running_flag.read().await {
+            if kill_subprocess {
+                let _ = child.kill().await;
+                break;
+            }
+            let mut delay = Delay::new(Duration::from_millis(500)).fuse();
+            let mut child_finished = child.wait().boxed().fuse();
+            select! {
+                _ = delay => {
+                    if *shared_running_flag_2.read().await == false {
+                        kill_subprocess = true;
+                    }
                 }
-                let mut delay = Delay::new(Duration::from_millis(500)).fuse();
-                let mut child_finished = child.wait().boxed().fuse();
-                select! {
-                    _ = delay => {
-                        if *shared_running_flag_2.read().await == false {
-                            kill_subprocess = true;
-                        }
-                    }
-                    _subprocess_finished = child_finished => {
-                        *shared_suprocess_running_flag.write().await = false;
-                    }
+                _subprocess_finished = child_finished => {
+                    *shared_suprocess_running_flag.write().await = false;
                 }
             }
-        });
+        }
+    });
 
-        tokio::spawn(async move {
-            let _ = tokio::join!(process_receiver, process_watchdog);
-        })
-    }
+    tokio::spawn(async move {
+        let _ = tokio::join!(process_receiver, process_watchdog);
+    })
+}
 
+impl MultiBenchmarkParameters {
     pub async fn run_tui(&self, config: Config) {
         use std::fs;
         use walkdir::WalkDir;
@@ -709,20 +719,18 @@ impl MultiBenchmarkParameters {
             let custom_fields_clone = custom_fields.clone();
             let crrspndents_clone = crrspndents.clone();
             let shared_running_flag_clone = shared_running_flag.clone();
-            let model_name_clone = model_name.clone();
             let result_path_clone = result_path.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await;
-                Self::start_benchmark_worker(
+                start_benchmark_subprocess(
                     model_config,
                     docs_for_model,
                     custom_fields_clone,
                     crrspndents_clone,
-                    model_name_clone,
-                    result_path_clone,
                     tx_clone,
                     shared_running_flag_clone,
+                    Some(result_path_clone),
                 )
                 .await
             });
@@ -772,20 +780,6 @@ impl MultiBenchmarkParameters {
         // Remove leading/trailing hyphens
         result_name.trim_matches('-').to_string()
     }
-}
-
-#[derive(Clone)]
-struct BenchmarkConfig {
-    verified_docs_tag: Option<String>,
-    sample_doc_size: Option<usize>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BenchmarkWorkerData {
-    config: Config,
-    doc_to_process: Vec<Document>,
-    custom_fields: Vec<CustomField>,
-    crrspndents: Vec<Correspondent>,
 }
 
 /// this function implements a benchmark worker as it's own subprocess
@@ -931,74 +925,15 @@ impl BenchmarkParameters {
             });
         }
 
-        let ownbinary = env::current_exe()
-            .expect("failed to get current executable path")
-            .display()
-            .to_string();
-        let mut child = Command::new(ownbinary)
-            .arg("benchmark-worker")
-            .stdout(std::process::Stdio::piped())
-            .stdin(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("failed to start benchmark process");
-
-        let mut stdin = child.stdin.take().expect("failed to open stdin");
-        let benchmark_run_data = serde_json::to_string(&BenchmarkWorkerData {
+        start_benchmark_subprocess(
             config,
             doc_to_process,
             custom_fields,
             crrspndents,
-        })
-        .unwrap();
-        let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
-        let _ = stdin.write_all(b"\n").await;
-        let _ = stdin.flush().await;
-
-        let stdout = child.stdout.take().expect("failed to open stdout");
-        let mut stdout_reader = BufReader::new(stdout).lines();
-
-        let shared_suprocess_running_flag = Arc::new(RwLock::new(true));
-        let shared_suprocess_running_flag_2 = shared_running_flag.clone();
-        let shared_running_flag_2 = shared_running_flag.clone();
-
-        let process_receiver = tokio::spawn(async move {
-            while let Ok(maybe_line) = stdout_reader.next_line().await
-                && *shared_running_flag.read().await
-                && *shared_suprocess_running_flag_2.read().await
-            {
-                if let Some(progress_channel) = progress_sender.as_mut()
-                    && let Some(line) = maybe_line
-                {
-                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&line) {
-                        let _ = progress_channel.send(update);
-                    }
-                }
-            }
-        });
-
-        let process_watchdog = tokio::spawn(async move {
-            let mut kill_subprocess = false;
-            while *shared_suprocess_running_flag.read().await {
-                if kill_subprocess {
-                    let _ = child.kill().await;
-                    break;
-                }
-                let mut delay = Delay::new(Duration::from_millis(500)).fuse();
-                let mut child_finished = child.wait().boxed().fuse();
-                select! {
-                    _ = delay => {
-                        if *shared_running_flag_2.read().await == false {
-                            kill_subprocess = true;
-                        }
-                    }
-                    _subprocess_finishd = child_finished => {
-                        *shared_suprocess_running_flag.write().await = false;
-                    }
-                }
-            }
-        });
-
-        let _ = tokio::join!(process_receiver, process_watchdog);
+            progress_sender.unwrap(),
+            shared_running_flag,
+            None,
+        )
+        .await;
     }
 }
