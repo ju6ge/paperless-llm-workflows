@@ -5,11 +5,7 @@ use futures::{FutureExt, StreamExt, select};
 use futures_timer::Delay;
 use itertools::Itertools;
 use ratatui::{
-    DefaultTerminal, Frame,
-    layout::{Constraint, Layout, Rect},
-    style::Stylize,
-    text::Line,
-    widgets::{Block, Gauge, Paragraph},
+    layout::{Constraint, Layout, Rect}, style::Stylize, text::Line, widgets::{Block, Gauge, Paragraph, Row, Table}, DefaultTerminal, Frame
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Duration;
@@ -151,9 +147,9 @@ impl BenchmarkApp {
         let [title_area, content_area] = vertical.areas(frame.area());
         let horizontal = Layout::horizontal([Fill(1); 2]);
         let [info_area, log_area] = horizontal.areas(content_area);
-        let benchmark_size: u16 = ((benchmark_state.keys().len())*2 + 2) as u16;
-        let infos = Layout::vertical([Length(benchmark_size)]);
-        let [progress_area] = infos.areas(info_area);
+        let benchmark_size: u16 = ((benchmark_state.keys().len()) * 2 + 2) as u16;
+        let infos = Layout::vertical([Length(benchmark_size), Min(0)]);
+        let [progress_area, result_area] = infos.areas(info_area);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::bordered().title(title))
@@ -165,6 +161,7 @@ impl BenchmarkApp {
             log_area,
         );
         render_progess_bars(frame, benchmark_state, progress_area);
+        render_results(frame, benchmark_state, result_area);
     }
 
     /// Reads the crossterm events and updates the state of [`App`].
@@ -206,6 +203,38 @@ impl BenchmarkApp {
     }
 }
 
+fn render_results(
+    frame: &mut Frame,
+    benchmark_state: &BTreeMap<String, BenchmarkRunData>,
+    area: Rect,
+) {
+    use Constraint::{Fill};
+
+    let result_block = Block::bordered().title("Result Preview");
+    let result_inner = result_block.inner(area);
+    let mut rows = vec![];
+    for (model_name, data) in benchmark_state.iter() {
+        if let Some(results) = &data.result {
+            let (succeded, failed, errored, success_rate) = results.current_stats();
+            rows.push(
+                Row::new(vec![
+                    format!("{}", model_name),
+                    format!("{}", succeded),
+                    format!("{}", failed),
+                    format!("{}", errored),
+                    format!("{:.2} %", success_rate * 100.),
+                ])
+            );
+        }
+    }
+    let widths = [ Fill(3), Fill(1), Fill(1), Fill(1), Fill(1) ];
+    let table = Table::new(rows, widths)
+        .header(Row::new(vec!["Model", "Success", "Failed", "Errors", "Sucess-Rate"]));
+
+    frame.render_widget(result_block, area);
+    frame.render_widget(table, result_inner);
+}
+
 fn render_progess_bars(
     frame: &mut Frame,
     benchmark_state: &BTreeMap<String, BenchmarkRunData>,
@@ -231,7 +260,7 @@ fn render_progess_bars(
                 .block(Block::new().title("Overall"))
                 .label(format!(" {}/{}", finished_docs, total_docs))
                 .ratio(finished_docs as f64 / total_docs as f64),
-            bar_areas[0]
+            bar_areas[0],
         );
         for ((model_name, data), area) in zip(benchmark_state.iter(), bar_areas[1..].iter()) {
             frame.render_widget(

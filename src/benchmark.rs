@@ -160,7 +160,7 @@ impl BenchmarkResults {
         println!("{}", Table::new(table_rows).with(Style::ascii()));
     }
 
-    pub fn current_stats(&self) {
+    pub fn current_stats(&self) -> (usize, usize, usize, f64) {
         let succeded = self
             .results
             .iter()
@@ -175,7 +175,7 @@ impl BenchmarkResults {
             .count();
         let errored = self.results.iter().filter(|r| r.error.is_some()).count();
         let success_rate = (succeded as f64) / (succeded + failed + errored) as f64;
-        println!("s:{succeded}|f:{failed}|e:{errored}|r:{success_rate}");
+        (succeded, failed, errored, success_rate)
     }
 }
 
