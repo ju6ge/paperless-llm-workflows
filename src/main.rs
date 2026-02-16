@@ -1,18 +1,23 @@
 use std::{path::Path, process::exit};
 
-use benchmark::BenchmarkParameters;
 use clap::Parser;
 use config::{Config, OverlayConfig};
 use paperless_api_client::Client;
 use server::run_server;
 use utoipa::OpenApi;
 
+#[cfg(feature = "benchmark")]
 mod benchmark;
 mod config;
 mod extract;
 mod requests;
 mod server;
+#[cfg(feature = "benchmark")]
+mod tui;
 mod types;
+
+#[cfg(feature = "benchmark")]
+use benchmark::{BenchmarkParameters, MultiBenchmarkParameters};
 
 #[cfg(any(
     all(feature = "vulkan", feature = "openmp"),
@@ -84,11 +89,26 @@ struct Args {
 enum Action {
     GenApiSpec,
     Server,
+    #[cfg(feature = "benchmark")]
+    #[clap(hide(true))]
+    BenchmarkWorker,
+    #[cfg(feature = "benchmark")]
     Benchmark(BenchmarkParameters),
+    #[cfg(feature = "benchmark")]
+    MultiBenchmark(MultiBenchmarkParameters),
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(1024 * 4000)
+        .build()
+        .unwrap();
+
+    rt.block_on(async_main());
+}
+
+async fn async_main() {
     let args = Args::parse();
     //colog::init();
 
@@ -111,7 +131,6 @@ async fn main() {
             tag_user_name: args.tag_user_name,
         });
 
-
     match args.action {
         Action::GenApiSpec => {
             println!(
@@ -121,8 +140,19 @@ async fn main() {
             );
             exit(0);
         }
+        #[cfg(feature = "benchmark")]
+        Action::BenchmarkWorker => {
+            let _ = tokio::task::spawn_blocking(benchmark::benchmark_worker).await;
+            exit(0);
+        }
+        #[cfg(feature = "benchmark")]
         Action::Benchmark(benchmark_parameters) => {
-            benchmark_parameters.run(config).await;
+            benchmark_parameters.run_tui(config).await;
+            exit(0);
+        }
+        #[cfg(feature = "benchmark")]
+        Action::MultiBenchmark(multi_benchmark_parameters) => {
+            multi_benchmark_parameters.run_tui(config).await;
             exit(0);
         }
         Action::Server => { /* keep going other option stop execution after completion */ }
