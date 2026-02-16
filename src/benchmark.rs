@@ -209,6 +209,8 @@ pub(crate) enum ProgressUpdate {
     },
     /// error report
     Error { model_name: String, error: String },
+    /// report benchmark finished
+    Finished { model_name: String },
 }
 
 struct BenchmarkContext<'a> {
@@ -217,6 +219,25 @@ struct BenchmarkContext<'a> {
     custom_fields: &'a Vec<CustomField>,
     crrspndents: &'a Vec<Correspondent>,
     results: &'a mut BenchmarkResults,
+}
+
+fn filename_to_result_name(path: &Path) -> String {
+    let filename = path.file_name().unwrap().to_string_lossy();
+    let filename = filename.trim_end_matches(".gguf").trim_end_matches(".GGUF");
+
+    // Convert to lowercase and replace common separators with hyphens
+    let mut result_name = filename.to_lowercase();
+    result_name = result_name.replace(|c: char| c == ' ' || c == '_' || c == '.' || c == '/', "-");
+    result_name = result_name.replace("-", "-");
+
+    // Remove multiple consecutive hyphens
+    result_name = result_name.replace("---", "-");
+    while result_name.contains("--") {
+        result_name = result_name.replace("--", "-");
+    }
+
+    // Remove leading/trailing hyphens
+    result_name.trim_matches('-').to_string()
 }
 
 fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
@@ -513,8 +534,42 @@ fn run_benchmark_for_document(
 
     // Run all benchmark types
     run_custom_field_benchmark(&mut ctx);
+    if log_to_stdio {
+        let _ = writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::BenchmarkResults {
+                model_name: model_name.to_string(),
+                results: ctx.results.clone(),
+            })
+            .unwrap()
+        );
+    }
+
     run_correspondent_suggest_benchmark(&mut ctx);
+    if log_to_stdio {
+        let _ = writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::BenchmarkResults {
+                model_name: model_name.to_string(),
+                results: ctx.results.clone(),
+            })
+            .unwrap()
+        );
+    }
     run_decision_benchmarks(&mut ctx);
+    if log_to_stdio {
+        let _ = writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::BenchmarkResults {
+                model_name: model_name.to_string(),
+                results: ctx.results.clone(),
+            })
+            .unwrap()
+        );
+    }
 
     // Send stats update
     if log_to_stdio {
@@ -550,7 +605,7 @@ async fn start_benchmark_subprocess(
     progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
     shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     result_path: Option<PathBuf>,
-) -> tokio::task::JoinHandle<()> {
+) {
     let ownbinary = env::current_exe()
         .expect("failed to get current executable path")
         .display()
@@ -700,7 +755,8 @@ impl MultiBenchmarkParameters {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.jobs));
 
         for model_file in &model_files {
-            let model_name = self.filename_to_result_name(model_file);
+            let model_name = filename_to_result_name(model_file);
+            let model_name2 = model_name.clone();
             let result_path =
                 Path::new(&self.output_directory).join(format!("{}.json", model_name));
 
@@ -725,18 +781,25 @@ impl MultiBenchmarkParameters {
             let shared_running_flag_clone = shared_running_flag.clone();
             let result_path_clone = result_path.clone();
 
-            let handle = tokio::spawn(async move {
-                let _permit = semaphore_clone.acquire().await;
-                start_benchmark_subprocess(
-                    model_config,
-                    docs_for_model,
-                    custom_fields_clone,
-                    crrspndents_clone,
-                    tx_clone,
-                    shared_running_flag_clone,
-                    Some(result_path_clone),
-                )
-                .await
+            handles.spawn(async move {
+                loop {
+                    if let Ok(_permit) = semaphore_clone.acquire().await {
+                        start_benchmark_subprocess(
+                            model_config,
+                            docs_for_model,
+                            custom_fields_clone,
+                            crrspndents_clone,
+                            tx_clone.clone(),
+                            shared_running_flag_clone,
+                            Some(result_path_clone),
+                        )
+                        .await;
+                        let _ = tx_clone.send(ProgressUpdate::Finished { model_name: model_name.clone() });
+                        break;
+                    } else {
+                        Delay::new(Duration::from_millis(500)).await;
+                    }
+                }
             });
 
             handles.push(handle);
@@ -764,26 +827,6 @@ impl MultiBenchmarkParameters {
             }
         }
     }
-
-    fn filename_to_result_name(&self, path: &Path) -> String {
-        let filename = path.file_name().unwrap().to_string_lossy();
-        let filename = filename.trim_end_matches(".gguf").trim_end_matches(".GGUF");
-
-        // Convert to lowercase and replace common separators with hyphens
-        let mut result_name = filename.to_lowercase();
-        result_name =
-            result_name.replace(|c: char| c == ' ' || c == '_' || c == '.' || c == '/', "-");
-        result_name = result_name.replace("-", "-");
-
-        // Remove multiple consecutive hyphens
-        result_name = result_name.replace("---", "-");
-        while result_name.contains("--") {
-            result_name = result_name.replace("--", "-");
-        }
-
-        // Remove leading/trailing hyphens
-        result_name.trim_matches('-').to_string()
-    }
 }
 
 /// this function implements a benchmark worker as it's own subprocess
@@ -808,12 +851,13 @@ pub(crate) fn benchmark_worker() {
     )
     .expect("Language model is required to load for benchmarking its performance");
 
+    let model_name = filename_to_result_name(Path::new(&benchmark_job_data.config.model));
     // Send start notification
     let _ = writeln!(
         std::io::stdout(),
         "{}",
         serde_json::to_string(&ProgressUpdate::Started {
-            model_name: benchmark_job_data.config.model.clone(),
+            model_name: model_name.clone(),
             total_docs: benchmark_job_data.doc_to_process.len(),
         })
         .unwrap()
@@ -821,7 +865,7 @@ pub(crate) fn benchmark_worker() {
 
     for (i, doc) in benchmark_job_data.doc_to_process.iter().enumerate() {
         run_benchmark_for_document(
-            &benchmark_job_data.config.model,
+            &model_name,
             &mut model,
             doc,
             &benchmark_job_data.custom_fields,
@@ -922,9 +966,11 @@ impl BenchmarkParameters {
                 &self.sample_doc_size,
             )
             .await;
+
+        let model_name = filename_to_result_name(Path::new(&config.model));
         if let Some(progress_channel) = progress_sender.as_mut() {
             let _ = progress_channel.send(ProgressUpdate::Register {
-                model_name: config.model.clone(),
+                model_name,
                 total_docs: doc_to_process.len(),
             });
         }

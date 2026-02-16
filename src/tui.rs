@@ -3,9 +3,12 @@ use std::{collections::BTreeMap, iter::zip, sync::Arc};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, select};
 use futures_timer::Delay;
-use itertools::Itertools;
 use ratatui::{
-    layout::{Constraint, Layout, Rect}, style::Stylize, text::Line, widgets::{Block, Gauge, Paragraph, Row, Table}, DefaultTerminal, Frame
+    DefaultTerminal, Frame,
+    layout::{Constraint, Layout, Rect},
+    style::{Style, Stylize},
+    text::Line,
+    widgets::{Block, Gauge, Paragraph, Row, Table},
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Duration;
@@ -100,7 +103,7 @@ impl BenchmarkApp {
                         benchmark_data.result = Some(results.clone())
                     }
                 }
-                ProgressUpdate::Error { .. } => { /* nothing to do here */ }
+                _ => { /* nothing to do here */ }
             }
             let mut log_messages = self.log_messages.write().await;
             log_messages.push(process_update);
@@ -108,7 +111,7 @@ impl BenchmarkApp {
     }
 
     /// Run the application's main loop.
-    pub async fn run(self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
+    pub async fn run(self, mut terminal: DefaultTerminal) -> Result<(), std::io::Error> {
         while *self.running.read().await {
             self.handle_benchmarking_updates().await;
             let log = self.log_messages.read().await.clone();
@@ -138,16 +141,12 @@ impl BenchmarkApp {
         let text = "\n\
             \n\
             Press `Esc`, `Ctrl-C` or `q` to stop running.";
-        let log = format!(
-            "LOG:\n{}",
-            log_messages.iter().map(|m| format!("{:?}", m)).join("\n-")
-        );
 
         let vertical = Layout::vertical([Length(6), Min(0)]);
         let [title_area, content_area] = vertical.areas(frame.area());
         let horizontal = Layout::horizontal([Fill(1); 2]);
         let [info_area, log_area] = horizontal.areas(content_area);
-        let benchmark_size: u16 = ((benchmark_state.keys().len()) * 2 + 2) as u16;
+        let benchmark_size: u16 = ((benchmark_state.keys().len()) * 3 + 2) as u16;
         let infos = Layout::vertical([Length(benchmark_size), Min(0)]);
         let [progress_area, result_area] = infos.areas(info_area);
         frame.render_widget(
@@ -156,16 +155,13 @@ impl BenchmarkApp {
                 .centered(),
             title_area,
         );
-        frame.render_widget(
-            Paragraph::new(log).block(Block::bordered()).centered(),
-            log_area,
-        );
+        render_logs(frame, log_messages, log_area);
         render_progess_bars(frame, benchmark_state, progress_area);
         render_results(frame, benchmark_state, result_area);
     }
 
     /// Reads the crossterm events and updates the state of [`App`].
-    async fn handle_crossterm_events(&self) -> color_eyre::Result<()> {
+    async fn handle_crossterm_events(&self) -> Result<(), std::io::Error> {
         let mut event_stream = self.event_stream.lock().await;
         let mut event = event_stream.next().fuse();
         let mut delay = Delay::new(Duration::from_millis(500)).fuse();
@@ -203,12 +199,44 @@ impl BenchmarkApp {
     }
 }
 
+fn render_logs(frame: &mut Frame, logs: &Vec<ProgressUpdate>, area: Rect) {
+    let logs_block = Block::bordered().title("LOG ");
+    let logs_inner = logs_block.inner(area);
+    let log_text = logs
+        .iter()
+        .map(|m| match m {
+            ProgressUpdate::Register { model_name, .. } => {
+                Line::raw(format!("Pending Benchmark for {model_name}"))
+                    .style(Style::new().magenta())
+            }
+            ProgressUpdate::Started { model_name, .. } => {
+                Line::raw(format!("Started Benchmark for {model_name}"))
+                    .style(Style::new().light_blue())
+            }
+            ProgressUpdate::DocumentProgress { model_name, .. } => {
+                Line::raw(format!("Progress update for {model_name}")).style(Style::new().yellow())
+            }
+            ProgressUpdate::BenchmarkResults { model_name, .. } => {
+                Line::raw(format!("Results updated for {model_name}")).style(Style::new().green())
+            }
+            ProgressUpdate::Error { model_name, .. } => {
+                Line::raw(format!("Error for {model_name}")).style(Style::new().red())
+            }
+            ProgressUpdate::Finished { model_name } => {
+                Line::raw(format!("Benchmark finihed {model_name}")).style(Style::new().cyan())
+            }
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(logs_block, area);
+    frame.render_widget(Paragraph::new(log_text), logs_inner);
+}
+
 fn render_results(
     frame: &mut Frame,
     benchmark_state: &BTreeMap<String, BenchmarkRunData>,
     area: Rect,
 ) {
-    use Constraint::{Fill};
+    use Constraint::Fill;
 
     let result_block = Block::bordered().title("Result Preview");
     let result_inner = result_block.inner(area);
@@ -216,20 +244,23 @@ fn render_results(
     for (model_name, data) in benchmark_state.iter() {
         if let Some(results) = &data.result {
             let (succeded, failed, errored, success_rate) = results.current_stats();
-            rows.push(
-                Row::new(vec![
-                    format!("{}", model_name),
-                    format!("{}", succeded),
-                    format!("{}", failed),
-                    format!("{}", errored),
-                    format!("{:.2} %", success_rate * 100.),
-                ])
-            );
+            rows.push(Row::new(vec![
+                format!("{}", model_name),
+                format!("{}", succeded),
+                format!("{}", failed),
+                format!("{}", errored),
+                format!("{:.2} %", success_rate * 100.),
+            ]));
         }
     }
-    let widths = [ Fill(3), Fill(1), Fill(1), Fill(1), Fill(1) ];
-    let table = Table::new(rows, widths)
-        .header(Row::new(vec!["Model", "Success", "Failed", "Errors", "Sucess-Rate"]));
+    let widths = [Fill(3), Fill(1), Fill(1), Fill(1), Fill(1)];
+    let table = Table::new(rows, widths).header(Row::new(vec![
+        "Model",
+        "Success",
+        "Failed",
+        "Errors",
+        "Sucess-Rate",
+    ]));
 
     frame.render_widget(result_block, area);
     frame.render_widget(table, result_inner);
