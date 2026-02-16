@@ -21,6 +21,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::Command,
     sync::RwLock,
+    task::JoinSet,
     time::Duration,
 };
 
@@ -750,7 +751,7 @@ impl MultiBenchmarkParameters {
 
         // Start benchmark processes for each model
         // Note: jobs parameter limits parallel subprocesses, but each model processes ALL documents
-        let mut handles = Vec::new();
+        let mut handles = JoinSet::new();
         let mut all_results = Vec::new();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.jobs));
 
@@ -802,17 +803,10 @@ impl MultiBenchmarkParameters {
                 }
             });
 
-            handles.push(handle);
-            all_results.push((model_name, result_path));
+            all_results.push((model_name2, result_path));
         }
 
-        // Wait for all benchmarks to complete
-        for handle in handles {
-            let _ = handle.await;
-        }
-
-        // Wait for TUI to finish
-        let _ = tui.await;
+        let _ = tokio::join!(handles.join_all(), tui);
         ratatui::restore();
 
         // Display summary of all results
