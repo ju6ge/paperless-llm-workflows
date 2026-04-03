@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, iter::zip, sync::Arc};
+use std::{cmp::max, collections::BTreeMap, iter::zip, sync::Arc};
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures::{FutureExt, StreamExt, select};
@@ -202,8 +202,11 @@ impl BenchmarkApp {
 fn render_logs(frame: &mut Frame, logs: &Vec<ProgressUpdate>, area: Rect) {
     let logs_block = Block::bordered().title("LOG ");
     let logs_inner = logs_block.inner(area);
+    let height = logs_inner.as_size().height;
+    let skip = max(logs.len() as i64 - height as i64, 0);
     let log_text = logs
         .iter()
+        .skip(skip as usize)
         .map(|m| match m {
             ProgressUpdate::Register { model_name, .. } => {
                 Line::raw(format!("Pending Benchmark for {model_name}"))
