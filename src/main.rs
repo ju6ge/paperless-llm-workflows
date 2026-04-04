@@ -142,8 +142,10 @@ async fn async_main() {
         }
         #[cfg(feature = "benchmark")]
         Action::BenchmarkWorker => {
-            let _ = tokio::task::spawn_blocking(benchmark::benchmark_worker).await;
-            exit(0);
+            match tokio::task::spawn_blocking(benchmark::benchmark_worker).await {
+                Ok(_) => exit(0),
+                Err(_) => exit(1),
+            }
         }
         #[cfg(feature = "benchmark")]
         Action::Benchmark(benchmark_parameters) => {

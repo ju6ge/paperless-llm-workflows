@@ -18,7 +18,7 @@ use serde_json::Value;
 use strum::VariantArray;
 use tabled::{Table, Tabled, settings::Style};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Command,
     sync::RwLock,
     task::JoinSet,
@@ -26,14 +26,10 @@ use tokio::{
 };
 
 use crate::{
-    config::Config,
-    extract::LLModelExtractor,
-    requests,
-    tui::BenchmarkApp,
-    types::{
+    config::Config, extract::LLModelExtractor, requests, tui::BenchmarkApp, types::{
         Decision, FieldExtract, custom_field_learning_supported, schema_from_custom_field,
         schema_from_decision_question,
-    },
+    }
 };
 
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
@@ -606,7 +602,7 @@ async fn start_benchmark_subprocess(
     progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
     shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     result_path: Option<PathBuf>,
-) {
+) -> Result<(), String> {
     let ownbinary = env::current_exe()
         .expect("failed to get current executable path")
         .display()
@@ -615,7 +611,7 @@ async fn start_benchmark_subprocess(
         .arg("benchmark-worker")
         .stdout(std::process::Stdio::piped())
         .stdin(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("failed to start benchmark process");
 
@@ -633,6 +629,8 @@ async fn start_benchmark_subprocess(
 
     let stdout = child.stdout.take().expect("failed to open stdout");
     let mut stdout_reader = BufReader::new(stdout).lines();
+
+    let stderr = child.stderr.take().expect("failed to open stderr");
 
     let shared_subprocess_running_flag = Arc::new(RwLock::new(true));
     let shared_subprocess_running_flag_2 = shared_subprocess_running_flag.clone();
@@ -675,6 +673,8 @@ async fn start_benchmark_subprocess(
         }
     });
 
+    let benchmark_failed = Arc::new(RwLock::new(false));
+    let benchmark_failed_2 = benchmark_failed.clone();
     let process_watchdog = tokio::spawn(async move {
         let mut kill_subprocess = false;
         while *shared_subprocess_running_flag.read().await {
@@ -691,7 +691,10 @@ async fn start_benchmark_subprocess(
                         kill_subprocess = true;
                     }
                 }
-                _subprocess_finished = child_finished => {
+                subprocess_finished = child_finished => {
+                    if subprocess_finished.is_err() || subprocess_finished.is_ok_and(|exit_code| !exit_code.success()) {
+                        *benchmark_failed_2.write().await = true;
+                    }
                     *shared_subprocess_running_flag.write().await = false;
                 }
             }
@@ -699,6 +702,15 @@ async fn start_benchmark_subprocess(
     });
 
     let _ = tokio::join!(process_receiver, process_watchdog);
+    if !*benchmark_failed.read().await {
+        Ok(())
+    } else {
+        let mut fail_reason = String::new();
+        let _ = BufReader::new(stderr)
+            .read_to_string(&mut fail_reason)
+            .await;
+        Err(fail_reason)
+    }
 }
 
 impl MultiBenchmarkParameters {
@@ -760,6 +772,8 @@ impl MultiBenchmarkParameters {
             let model_name2 = model_name.clone();
             let result_path =
                 Path::new(&self.output_directory).join(format!("{}.json", model_name));
+            let error_path =
+                Path::new(&self.output_directory).join(format!("{}.error", model_name));
 
             // Create config for this model
             let mut model_config = config.clone();
@@ -785,7 +799,7 @@ impl MultiBenchmarkParameters {
             handles.spawn(async move {
                 loop {
                     if let Ok(_permit) = semaphore_clone.acquire().await {
-                        start_benchmark_subprocess(
+                        match start_benchmark_subprocess(
                             model_config,
                             docs_for_model,
                             custom_fields_clone,
@@ -794,8 +808,31 @@ impl MultiBenchmarkParameters {
                             shared_running_flag_clone,
                             Some(result_path_clone),
                         )
-                        .await;
-                        let _ = tx_clone.send(ProgressUpdate::Finished { model_name: model_name.clone() });
+                        .await
+                        {
+                            Ok(_) => {
+                                let _ = tx_clone.send(ProgressUpdate::Finished {
+                                    model_name: model_name.clone(),
+                                });
+                            }
+                            Err(err_msg) => {
+                                let mut file = OpenOptions::new()
+                                    .create(true)
+                                    .write(true)
+                                    .append(false)
+                                    .truncate(true)
+                                    .open(&error_path)
+                                    .expect("Failed to create results file");
+                                let _ = writeln!(&mut file, "{err_msg}");
+                                let _ = tx_clone.send(ProgressUpdate::Error {
+                                    model_name: model_name.clone(),
+                                    error: err_msg,
+                                });
+                                let _ = tx_clone.send(ProgressUpdate::Finished {
+                                    model_name: model_name.clone(),
+                                });
+                            },
+                        }
                         break;
                     } else {
                         Delay::new(Duration::from_millis(500)).await;
@@ -969,7 +1006,7 @@ impl BenchmarkParameters {
             });
         }
 
-        start_benchmark_subprocess(
+        let _ = start_benchmark_subprocess(
             config,
             doc_to_process,
             custom_fields,
