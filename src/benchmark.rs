@@ -8,11 +8,15 @@ use std::{
 
 use futures::{FutureExt, select};
 use futures_timer::Delay;
+use itertools::Itertools;
 use paperless_api_client::{
     Client,
     types::{Correspondent, CustomField, Document},
 };
-use rand::{rng, seq::IteratorRandom};
+use rand::{
+    rng,
+    seq::{IndexedRandom, IteratorRandom},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantArray;
@@ -26,10 +30,14 @@ use tokio::{
 };
 
 use crate::{
-    config::Config, extract::LLModelExtractor, requests, tui::BenchmarkApp, types::{
+    config::Config,
+    extract::LLModelExtractor,
+    requests,
+    tui::BenchmarkApp,
+    types::{
         Decision, FieldExtract, custom_field_learning_supported, schema_from_custom_field,
         schema_from_decision_question,
-    }
+    },
 };
 
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
@@ -70,6 +78,10 @@ pub(crate) struct MultiBenchmarkParameters {
     #[clap(long, default_value = "4")]
     /// number of parallel benchmark jobs
     jobs: usize,
+
+    #[clap(long, default_value = "false", action)]
+    /// load last benchmark result and continue remainig benchmarks with same document set
+    continue_last: bool,
 }
 
 #[derive(
@@ -747,13 +759,63 @@ impl MultiBenchmarkParameters {
             return;
         }
 
+        let mut longest_result: Option<BenchmarkResults> = None;
+        if self.continue_last {
+            for model_file in &model_files {
+                // find all model result files and load the longest one to fetch all document ids
+                let model_name = filename_to_result_name(model_file);
+                let result_path =
+                    Path::new(&self.output_directory).join(format!("{}.json", model_name));
+                if let Ok(result_file) = OpenOptions::new().read(true).open(result_path) {
+                    let result_data: BenchmarkResults =
+                        serde_json::from_reader(&result_file).unwrap();
+                    if longest_result.as_ref().is_none()
+                        || longest_result
+                            .as_ref()
+                            .map(|lr| {
+                                lr.results
+                                    .iter()
+                                    .map(|sr| sr.doc_id)
+                                    .dedup()
+                                    .collect::<Vec<_>>()
+                            })
+                            .is_some_and(|lr| {
+                                lr.len()
+                                    < result_data
+                                        .results
+                                        .iter()
+                                        .map(|sr| sr.doc_id)
+                                        .dedup()
+                                        .collect::<Vec<_>>()
+                                        .len()
+                            })
+                    {
+                        longest_result = Some(result_data);
+                    }
+                };
+            }
+        }
+
         let (custom_fields, crrspndents, doc_to_process) =
-            get_benchmark_data_from_paperless_instance(
-                &config,
-                &self.verified_docs_tag,
-                &self.sample_doc_size,
-            )
-            .await;
+            if let Some(longest_result) = &longest_result {
+                get_benchmark_data_from_paperless_by_doc_ids(
+                    &config,
+                    &longest_result
+                        .results
+                        .iter()
+                        .map(|r| r.doc_id)
+                        .dedup()
+                        .collect::<Vec<i64>>(),
+                )
+                .await
+            } else {
+                get_benchmark_data_from_paperless_instance(
+                    &config,
+                    &self.verified_docs_tag,
+                    &self.sample_doc_size,
+                )
+                .await
+            };
 
         // Initialize TUI for multi-benchmark
         let shared_running_flag = Arc::new(tokio::sync::RwLock::new(true));
@@ -780,7 +842,7 @@ impl MultiBenchmarkParameters {
             model_config.model = model_file.to_string_lossy().to_string();
 
             // Each model processes ALL documents
-            let docs_for_model = doc_to_process.clone();
+            let mut docs_for_model = doc_to_process.clone();
 
             // Send register update for TUI
             let tx_clone = tx.clone();
@@ -788,6 +850,46 @@ impl MultiBenchmarkParameters {
                 model_name: model_name.clone(),
                 total_docs: docs_for_model.len(),
             });
+
+            if self.continue_last {
+                if let Ok(result_file) = OpenOptions::new().read(true).open(&result_path) {
+                    let result_data: BenchmarkResults =
+                        serde_json::from_reader(&result_file).unwrap();
+                    docs_for_model = docs_for_model
+                        .into_iter()
+                        .filter(|doc| {
+                            !longest_result.as_ref().is_some_and(|lr| {
+                                lr.results
+                                    .iter()
+                                    .map(|sr| sr.doc_id)
+                                    .dedup()
+                                    .contains(&doc.id)
+                            })
+                        })
+                        .collect();
+                    let _ = tx_clone.send(ProgressUpdate::DocumentProgress {
+                        model_name: model_name.clone(),
+                        doc_id: -1,
+                        progress: result_data
+                            .results
+                            .iter()
+                            .map(|sr| sr.doc_id)
+                            .dedup()
+                            .count(),
+                        total: doc_to_process.len(),
+                    });
+                    let _ = tx_clone.send(ProgressUpdate::BenchmarkResults {
+                        model_name: model_name.clone(),
+                        results: result_data,
+                    });
+                    if docs_for_model.is_empty() {
+                        let _ = tx_clone.send(ProgressUpdate::Finished {
+                            model_name: model_name.clone(),
+                        });
+                        continue;
+                    }
+                }
+            }
 
             // Start benchmark worker with semaphore
             let semaphore_clone = semaphore.clone();
@@ -831,7 +933,7 @@ impl MultiBenchmarkParameters {
                                 let _ = tx_clone.send(ProgressUpdate::Finished {
                                     model_name: model_name.clone(),
                                 });
-                            },
+                            }
                         }
                         break;
                     } else {
@@ -918,6 +1020,26 @@ pub(crate) fn benchmark_worker() {
         })
         .unwrap()
     );
+}
+
+async fn get_benchmark_data_from_paperless_by_doc_ids(
+    config: &Config,
+    document_ids: &[i64],
+) -> (Vec<CustomField>, Vec<Correspondent>, Vec<Document>) {
+    let mut api_client = Client::new_from_env();
+    api_client.set_base_url(&config.paperless_server);
+
+    let custom_fields = requests::get_all_custom_fields(&mut api_client).await;
+    let crrspndents = requests::fetch_all_correspondents(&mut api_client).await;
+    let all_docs_process = requests::get_all_docs(&mut api_client)
+        .await
+        .into_iter()
+        .collect::<Vec<_>>();
+    let doc_to_process = document_ids
+        .iter()
+        .filter_map(|id| all_docs_process.iter().find(|doc| doc.id == *id).cloned())
+        .collect();
+    (custom_fields, crrspndents, doc_to_process)
 }
 
 async fn get_benchmark_data_from_paperless_instance(
