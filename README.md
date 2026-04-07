@@ -17,7 +17,8 @@ If you are looking for document chat or don't care and are fine sending all your
 
 Under the hood this software is running `llama.cpp` as an inference engine to provide a local language model without depending on any cloud providers. Depending on the selected feature it is possible to run
 with `cuda`, `vulkan` or `openmp` acceleration.
-As a base model this software is using a quantized version of `Ministral 3` to reduce the resource requirements and enable running this even with limited resources.
+As a base model this software is using a quantized version of `Qwen3 4B` to reduce the resource requirements and enable running this even with limited resources.
+If you are interested in how I selected this model, you can read my [blog post](https://www.felixrichter.tech/posts/llm-benchmarking/) about the process ;).
 
 Long term I want expand the features to enable fine tuning models to your document corpus. This is where the actual learning would come in.
 
