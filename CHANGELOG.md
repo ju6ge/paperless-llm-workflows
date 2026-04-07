@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3 - 2026-04-07]
+
+### Changed
+- Changed default model shipped with paperless-llm-workflow to qwen3 4b (best performing model according to benchmarks)
+
 ### Added
 - Expand command line argument to include all configuration keys
+- Added cmd flag to continue benchmarking for a previous run (using same documents for new models)
+- Added benchmarking feature flag, full benchmarking command with interactive progress tui
+
+### Fixed
+- latest llama-cpp-rs bindings with updated token generation functions and sampling pipeline improvements
 
 ### Removed
 - Obsolete correspondent suggest configuration option
