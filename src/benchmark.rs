@@ -13,10 +13,7 @@ use paperless_api_client::{
     Client,
     types::{Correspondent, CustomField, Document},
 };
-use rand::{
-    rng,
-    seq::{IndexedRandom, IteratorRandom},
-};
+use rand::{rng, seq::IteratorRandom};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::VariantArray;
