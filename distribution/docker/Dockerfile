@@ -28,7 +28,9 @@ ENV GGUF_MODEL_PATH="/srv/model/model.gguf"
 
 RUN apt-get update && \
     apt-get install -y curl && \
-    if [ "${INFERENCE_BACKEND}" = "vulkan" ]; then apt-get install libvulkan-dev libshaderc-dev glslc -y; fi
+    if [ "${INFERENCE_BACKEND}" = "vulkan" ]; then apt-get install libvulkan-dev libshaderc-dev glslc -y; fi && \
+    echo "deb http://deb.debian.org/debian/ trixie contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    apt-get update && apt-get install nvidia-driver firmware-misc-nonfree -y
 
 RUN mkdir -p $(dirname "$GGUF_MODEL_PATH") && curl -Lo "$GGUF_MODEL_PATH" "$MODEL_URL" && curl -Lo "$(dirname "$GGUF_MODEL_PATH")/LICENSE" "$MODEL_LICENSE_URL"
 
