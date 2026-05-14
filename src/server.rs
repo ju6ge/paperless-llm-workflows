@@ -665,10 +665,43 @@ async fn custom_field_prediction(
     Ok(HttpResponse::Accepted().into())
 }
 
+#[utoipa::path(tag = "llm_workflow_trigger", request_body = inline(TitleSuggestParams))]
+#[post("/suggest/title")]
+/// Workflow to suggest a document title
+///
+/// Given the document content, use the LLM to generate a title. Optionally a jinja-style template
+/// can be provided to control the title format, e.g. `{{correspondent}} - {{date}} - {{subject}}`.
+/// When a template is used, the LLM generates each field individually and the code composes the
+/// final title. Without a template, a single free-form title is generated.
+async fn suggest_title(
+    params: web::Json<TitleSuggestParams>,
+    status_tags: Data<PaperlessStatusTags>,
+    api_client: Data<Client>,
+    config: Data<Config>,
+    document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
+) -> Result<HttpResponse, WebhookError> {
+    let webhook_params = WebhookParams {
+        document_url: params.document_url.clone(),
+        next_tag: params.next_tag.clone(),
+    };
+    webhook_params
+        .handle_request(
+            status_tags,
+            api_client,
+            config,
+            document_pipeline,
+            ProcessingType::TitleSuggest {
+                template: params.template.clone(),
+            },
+        )
+        .await?;
+    Ok(HttpResponse::Accepted().into())
+}
+
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(suggest_correspondent, custom_field_prediction, decision),
-    components(schemas(WebhookParams))
+    paths(suggest_correspondent, custom_field_prediction, decision, suggest_title),
+    components(schemas(WebhookParams, TitleSuggestParams))
 )]
 pub(crate) struct DocumentProcessingApiSpec;
 
@@ -679,6 +712,7 @@ impl HttpServiceFactory for DocumentProcessingApi {
         custom_field_prediction.register(config);
         suggest_correspondent.register(config);
         decision.register(config);
+        suggest_title.register(config);
     }
 }
 
