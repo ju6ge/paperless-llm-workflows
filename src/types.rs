@@ -417,3 +417,26 @@ pub(crate) fn parse_title_template(template: &str) -> Vec<String> {
         .map(|cap| cap.get(1).unwrap().as_str().to_string())
         .collect()
 }
+
+pub(crate) fn schema_from_title_template(template: Option<&str>) -> schemars::Schema {
+    let keys = match template {
+        Some(t) if !t.is_empty() => parse_title_template(t),
+        _ => vec!["title".to_string()],
+    };
+
+    let mut properties_map = serde_json::Map::new();
+    for key in &keys {
+        properties_map.insert(
+            key.clone(),
+            json!({"type": "string"}),
+        );
+    }
+
+    let schema_value: Value = json!({
+        "type": "object",
+        "properties": properties_map,
+        "required": keys
+    });
+
+    serde_json::from_value(schema_value).unwrap()
+}
