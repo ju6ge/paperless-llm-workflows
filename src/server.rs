@@ -66,6 +66,9 @@ enum ProcessingType {
         true_tag: Option<Tag>,
         false_tag: Option<Tag>,
     },
+    TitleSuggest {
+        template: Option<String>,
+    },
 }
 
 impl Hash for ProcessingType {
@@ -213,6 +216,14 @@ async fn handle_custom_field_prediction(
     // defered sync back to paperless instance
     // after successfull finish the state of document on paperless will be updated by the update task
     Ok(())
+}
+
+async fn handle_title_suggestion(
+    _doc: &mut Document,
+    _api_client: &mut Client,
+    _template: &Option<String>,
+) -> Result<(), DocumentProcessingError> {
+    unimplemented!("handle_title_suggestion not yet implemented")
 }
 
 async fn handle_decision(
@@ -665,6 +676,9 @@ fn merge_document_status(
                 }
             }
         }
+        ProcessingType::TitleSuggest { template: _ } => {
+            doc.title = updated_doc.title.clone();
+        }
     }
 }
 
@@ -754,6 +768,9 @@ async fn document_updater(
                     } => {
                         // nothing needs to happen here, the updated tags are already part of the document
                         // since they are synced with the same document in the queue
+                    }
+                    ProcessingType::TitleSuggest { template: _ } => {
+                        // nothing to do here, title is already on the document
                     }
                 }
             }
@@ -895,6 +912,14 @@ async fn document_processor(
                         question,
                         true_tag.as_ref(),
                         false_tag.as_ref(),
+                    )
+                    .await
+                }
+                ProcessingType::TitleSuggest { ref template } => {
+                    handle_title_suggestion(
+                        &mut doc_process_req.document,
+                        &mut api_client,
+                        template,
                     )
                     .await
                 }
