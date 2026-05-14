@@ -313,7 +313,17 @@ struct FillAllCustomFields {
     ///
     /// must be either an integer referencing the custom field id, or string referencing the custom field name
     ignore_custom_fields: Option<Vec<Value>>,
-    /// optional tag to assign if the answer is false
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
+    next_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct TitleSuggestParams {
+    /// url of the document that should be processed
+    document_url: String,
+    /// optional jinja-style template for title formatting, e.g. "{{correspondent}} - {{date}} - {{subject}}". If unspecified, a single free-form title is generated.
+    template: Option<String>,
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
     next_tag: Option<String>,
 }
 
