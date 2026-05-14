@@ -219,11 +219,54 @@ async fn handle_custom_field_prediction(
 }
 
 async fn handle_title_suggestion(
-    _doc: &mut Document,
+    doc: &mut Document,
     _api_client: &mut Client,
-    _template: &Option<String>,
+    template: &Option<String>,
 ) -> Result<(), DocumentProcessingError> {
-    unimplemented!("handle_title_suggestion not yet implemented")
+    let title_schema = crate::types::schema_from_title_template(template.as_deref());
+
+    let doc_data = serde_json::to_value(&doc.content).unwrap();
+
+    let extracted = spawn_blocking(move || {
+        let mut model_singleton = MODEL_SINGLETON.blocking_lock();
+        if let Some(model) = model_singleton.as_mut() {
+            model.extract(&doc_data, &title_schema, false)
+        } else {
+            Err(crate::extract::ModelError::ModelNotLoaded)
+        }
+    })
+    .await??;
+
+    log::debug!(
+        "Extracted title fields for document {}\n{extracted:#?}",
+        doc.id
+    );
+
+    let title = match template {
+        Some(t) if !t.is_empty() => {
+            let fields: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_value(extracted).map_err(FieldError::from)?;
+            let keys = crate::types::parse_title_template(t);
+            let mut result = t.clone();
+            for key in keys {
+                let val = fields.get(&key).and_then(|v| v.as_str()).unwrap_or("");
+                result = result.replace(&format!("{{{{{}}}}}", key), val);
+            }
+            result
+        }
+        _ => {
+            let fields: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_value(extracted).map_err(FieldError::from)?;
+            fields.get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+
+    doc.title = Some(title);
+
+    Ok(())
 }
 
 async fn handle_decision(
