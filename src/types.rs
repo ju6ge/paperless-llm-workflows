@@ -1,9 +1,13 @@
 use chrono::NaiveDate;
+use once_cell::sync::Lazy;
 use paperless_api_client::types::{Correspondent, CustomField, CustomFieldInstance, DataTypeEnum};
+use regex::Regex;
 use schemars::{JsonSchema, json_schema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+
+static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}\}");
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 /// Structure to extract currency data from a document
@@ -405,4 +409,11 @@ pub(crate) fn schema_from_decision_question(question: &String) -> schemars::Sche
         })
     });
     base_schema
+}
+
+pub(crate) fn parse_title_template(template: &str) -> Vec<String> {
+    TEMPLATE_KEY_REGEX
+        .captures_iter(template)
+        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+        .collect()
 }
