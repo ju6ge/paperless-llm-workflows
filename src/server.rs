@@ -795,6 +795,7 @@ async fn document_updater(
 
             let mut updated_cf: Option<Vec<CustomFieldInstance>> = None;
             let mut updated_crrspdnt: Option<i64> = None;
+            let mut updated_title: Option<String> = None;
 
             for doc_processing_steps in [doc_req.processing_type]
                 .iter()
@@ -823,7 +824,11 @@ async fn document_updater(
                         // since they are synced with the same document in the queue
                     }
                     ProcessingType::TitleSuggest { template: _ } => {
-                        // nothing to do here, title is already on the document
+                        if let Some(ref t) = doc_req.document.title
+                            && !t.is_empty()
+                        {
+                            updated_title = Some(t.clone());
+                        }
                     }
                 }
             }
@@ -837,6 +842,7 @@ async fn document_updater(
                 doc_req.document.id,
                 updated_doc_tags,
                 updated_crrspdnt,
+                updated_title,
                 updated_cf,
             )
             .await
@@ -859,6 +865,7 @@ async fn document_updater(
                     &mut api_client,
                     doc_req.document.id,
                     updated_tag_with_error,
+                    None,
                     None,
                     None,
                 )

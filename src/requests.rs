@@ -14,6 +14,7 @@ pub async fn processed_doc_update(
     doc_id: i64,
     tags: Vec<i64>,
     correspondent: Option<i64>,
+    title: Option<String>,
     cf: Option<Vec<CustomFieldInstance>>,
 ) -> Result<(), paperless_api_client::types::error::Error> {
     client
@@ -24,7 +25,7 @@ pub async fn processed_doc_update(
                 correspondent,
                 document_type: None,
                 storage_path: None,
-                title: None,
+                title,
                 content: None,
                 tags: Some(tags),
                 created: None,
