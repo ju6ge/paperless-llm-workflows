@@ -110,7 +110,6 @@ fn main() {
 
 async fn async_main() {
     let args = Args::parse();
-    //colog::init();
 
     let config = Config::default()
         .overlay_config(OverlayConfig::read_config_toml(Path::new(
@@ -157,7 +156,10 @@ async fn async_main() {
             multi_benchmark_parameters.run_tui(config).await;
             exit(0);
         }
-        Action::Server => { /* keep going other option stop execution after completion */ }
+        Action::Server => {
+            colog::init();
+            /* keep going other option stop execution after completion */
+        }
     }
 
     let _model_path = Path::new(&config.model)
