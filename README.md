@@ -104,7 +104,7 @@ The default container is setup to include a model already and with some environm
     -e PAPERLESS_API_CLIENT_API_TOKEN=<token> \
     -e PAPERLESS_SERVER=<paperless_ngx_url> \
     -e PAPERLESS_USER=<user> \ # used for tag creation
-    ghcr.io/ju6ge/paperless-llm-workflows:<version>-<backend>
+    ghcr.io/ju6ge/paperless-llm-workflows:<version>-<backend> server
 ```
 
 Currently only the `vulkan` backend has a prebuilt container availible, it should be fine for most deployments even without a graphics processor availible.
