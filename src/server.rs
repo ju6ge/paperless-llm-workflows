@@ -513,7 +513,7 @@ async fn suggest_correspondent(
 /// - [x] Select
 /// - [ ] Document Link
 /// - [ ] URL
-/// - [ ] LargeText
+/// - [x] LargeText
 async fn custom_field_prediction(
     params: web::Json<WebhookParams>,
     status_tags: Data<PaperlessStatusTags>,

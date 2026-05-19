@@ -2236,9 +2236,9 @@ dependencies = [
 
 [[package]]
 name = "paperless-api-client"
-version = "6.0.1"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d211234b1f39d4af95f1def920e4241244b5c5b547861834623f7459c2db6ee3"
+checksum = "af48903494ff395bc074dcd88c119e53210298f76be5b8c274e2fcdb4cada1c0"
 dependencies = [
  "anyhow",
  "async-trait",

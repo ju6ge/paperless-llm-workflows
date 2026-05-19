@@ -88,6 +88,13 @@ impl FieldExtract {
                     field: custom_field_spec.id,
                 })
             }
+            paperless_api_client::types::DataTypeEnum::Longtext => {
+                let _parsed_value: String = serde_json::from_value(self.value.clone())?;
+                Ok(CustomFieldInstance {
+                    value: Some(self.value.clone()),
+                    field: custom_field_spec.id,
+                })
+            }
             paperless_api_client::types::DataTypeEnum::Date => {
                 let _parsed_value: NaiveDate = serde_json::from_value(self.value.clone())?;
                 Ok(CustomFieldInstance {
@@ -225,6 +232,9 @@ fn guide_value_from_custom_field(cf: &CustomField) -> Option<GuideDef> {
                 value: enum_values,
             })
         }
+        DataTypeEnum::Longtext => {
+            None
+        }
         DataTypeEnum::Url | DataTypeEnum::Documentlink => {
             // currently unsupported custom fields
             // will probably require some guidance when implemented
@@ -298,6 +308,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     }
     let field_schema = match cf.data_type {
         paperless_api_client::types::DataTypeEnum::String => schema_for!(String),
+        paperless_api_client::types::DataTypeEnum::Longtext => schema_for!(String),
         paperless_api_client::types::DataTypeEnum::Date => schema_for!(chrono::NaiveDate),
         paperless_api_client::types::DataTypeEnum::Boolean => schema_for!(bool),
         paperless_api_client::types::DataTypeEnum::Integer => schema_for!(i64),
