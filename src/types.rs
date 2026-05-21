@@ -193,7 +193,14 @@ struct GuideDef {
 /// fields definition.
 fn guide_value_from_custom_field(cf: &CustomField) -> Option<GuideDef> {
     match cf.data_type {
-        DataTypeEnum::String
+        DataTypeEnum::String => {
+            // expect the date as rfc3339 format
+            Some(GuideDef {
+                name: "max_length".to_string(),
+                value: json!(128),
+            })
+        }
+        DataTypeEnum::Longtext
         | DataTypeEnum::Boolean
         | DataTypeEnum::Integer
         | DataTypeEnum::Float
@@ -231,9 +238,6 @@ fn guide_value_from_custom_field(cf: &CustomField) -> Option<GuideDef> {
                 name: "one_of".to_string(),
                 value: enum_values,
             })
-        }
-        DataTypeEnum::Longtext => {
-            None
         }
         DataTypeEnum::Url | DataTypeEnum::Documentlink => {
             // currently unsupported custom fields
