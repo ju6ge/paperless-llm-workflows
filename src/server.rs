@@ -135,16 +135,21 @@ async fn handle_custom_field_prediction(
     api_client: &mut Client,
 ) -> Result<(), DocumentProcessingError> {
     // fetch all custom field definitions for fields on the document that need to be filled
-    let relevant_custom_fields: Vec<CustomField> = requests::get_custom_fields_by_id(
-        api_client,
-        doc.custom_fields.as_ref().map(|cfis| {
+    let relevant_custom_fields: Vec<CustomField> =
+    if let Some(cf_ids) = doc.custom_fields.as_ref().map(|cfis| {
             cfis.iter()
                 .filter(|cfi| cfi.value.is_none())
                 .map(|cfi| cfi.field)
                 .collect()
-        }),
-    )
-    .await
+        })
+    {
+        requests::get_custom_fields_by_id( 
+            api_client,
+            cf_ids
+        ) .await
+    } else {
+        vec![]
+    }
     // this filters out all custom fields that are currently unsupported
     .into_iter().filter(|cf| {
         let learning_supported = custom_field_learning_supported(cf);

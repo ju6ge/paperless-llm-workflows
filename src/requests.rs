@@ -98,21 +98,40 @@ pub async fn fetch_tag_by_id_or_name(
 
 pub async fn get_custom_fields_by_id(
     client: &mut Client,
-    custom_field_ids: Option<Vec<i64>>,
+    custom_field_ids: Vec<i64>,
 ) -> Vec<CustomField> {
-    client
+    let maybe_all_cfs = client
         .custom_fields()
-        .list_stream(None, custom_field_ids, None, None, None, None, None, None)
-        .filter_map(async |tag_result| {
-            tag_result
-                .map_err(|err| {
-                    error!("{err}");
-                    err
-                })
-                .ok()
-        })
-        .collect()
-        .await
+        .list_stream(
+            None,
+            Some(custom_field_ids.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .collect::<Vec<_>>()
+        .await;
+    if maybe_all_cfs.iter().any(|c| c.is_err()) {
+        // a single deserialization failure result in the entire page of custom fields failing to parse
+        // fall back to fetch custom_fields one by one
+        futures::stream::iter(custom_field_ids)
+            .map(async |cf_id| (client.custom_fields().retrieve(cf_id).await, cf_id))
+            .filter_map(async |v| {
+                let (result, cf_id) = v.await;
+                if let Err(err) = &result {
+                    error!("Error fetching custom field with {cf_id}:\n{err}")
+                }
+                result.ok()
+            })
+            .collect()
+            .await
+    } else {
+        // there won't be an error to log otherwise we are in the other branch
+        maybe_all_cfs.into_iter().filter_map(|cf| cf.ok()).collect()
+    }
 }
 
 pub async fn get_all_tags(client: &mut Client) -> Vec<Tag> {
