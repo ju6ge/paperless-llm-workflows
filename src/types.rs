@@ -82,9 +82,12 @@ impl FieldExtract {
                 })
             }
             paperless_api_client::types::DataTypeEnum::String => {
-                let _parsed_value: String = serde_json::from_value(self.value.clone())?;
+                let mut parsed_value: String = serde_json::from_value(self.value.clone())?;
+                // string custom fields in paperless may only be at most 128 chars
+                parsed_value.truncate(127);
+                parsed_value.push('…');
                 Ok(CustomFieldInstance {
-                    value: Some(self.value.clone()),
+                    value: Some(Value::from(parsed_value)),
                     field: custom_field_spec.id,
                 })
             }
