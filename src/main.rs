@@ -80,6 +80,10 @@ struct Args {
     #[clap(long, global = true)]
     finished_color: Option<String>,
 
+    /// Enable error doc tag to indicate the was an error in the llm workflow pipeline
+    #[clap(long, action)]
+    enable_error_tag: bool,
+
     /// Display name of the error tag
     #[clap(long, global = true)]
     error_tag: Option<String>,
@@ -135,6 +139,7 @@ async fn async_main() {
             processing_color: args.processing_color,
             finished_tag: args.finished_tag,
             finished_color: args.finished_color,
+            error_tag_enable: Some(args.enable_error_tag),
             error_tag: args.error_tag,
             error_color: args.error_color,
             tag_user_name: args.tag_user_name,
