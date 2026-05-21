@@ -80,6 +80,14 @@ struct Args {
     #[clap(long, global = true)]
     finished_color: Option<String>,
 
+    /// Display name of the error tag
+    #[clap(long, global = true)]
+    error_tag: Option<String>,
+
+    /// Display color of the error tag
+    #[clap(long, global = true)]
+    error_color: Option<String>,
+
     /// Default user for tag creation
     #[clap(long, global = true)]
     tag_user_name: Option<String>,
@@ -127,6 +135,8 @@ async fn async_main() {
             processing_color: args.processing_color,
             finished_tag: args.finished_tag,
             finished_color: args.finished_color,
+            error_tag: args.error_tag,
+            error_color: args.error_color,
             tag_user_name: args.tag_user_name,
         });
 
