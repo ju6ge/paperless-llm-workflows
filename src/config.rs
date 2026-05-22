@@ -12,6 +12,9 @@ pub(crate) struct Config {
     pub(crate) processing_color: String,
     pub(crate) finished_tag: String,
     pub(crate) finished_color: String,
+    pub(crate) error_tag_enable: bool,
+    pub(crate) error_tag: String,
+    pub(crate) error_color: String,
     pub(crate) tag_user_name: String,
     pub(crate) model: String,
     pub(crate) num_gpu_layers: usize,
@@ -27,6 +30,9 @@ pub(crate) struct OverlayConfig {
     pub(crate) processing_color: Option<String>,
     pub(crate) finished_tag: Option<String>,
     pub(crate) finished_color: Option<String>,
+    pub(crate) error_tag_enable: Option<bool>,
+    pub(crate) error_tag: Option<String>,
+    pub(crate) error_color: Option<String>,
     pub(crate) tag_user_name: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) num_gpu_layers: Option<usize>,
@@ -42,19 +48,22 @@ enum OverlayConfigError {
 }
 
 impl Config {
-    pub fn new<S: ToString>(processing_tag: S, finished_tag: S, tag_user: S, model: S) -> Self {
+    pub fn new<S: ToString>(tag_user: S, model: S) -> Self {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8123,
             paperless_server: "https://example-paperless.domain".to_string(),
-            processing_tag: processing_tag.to_string(),
+            processing_tag: "🧠 processing".to_string(),
             processing_color: "#ffe000".to_string(),
-            finished_tag: finished_tag.to_string(),
+            finished_tag: "🏷️ finished".to_string(),
             finished_color: "#40aebf".to_string(),
             tag_user_name: tag_user.to_string(),
+            error_tag_enable: false, // for no this feature should be opt in
+            error_tag: "⚠️ error".to_string(),
+            error_color: "#e45858".to_string(), // 0 will mean that per default max ctx train of the model will be used, this is potentially way to large
             model: model.to_string(),
             num_gpu_layers: 1024,
-            max_ctx: 0, // 0 will mean that per default max ctx train of the model will be used, this is potentially way to large
+            max_ctx: 0,
         }
     }
 
@@ -69,6 +78,11 @@ impl Config {
             processing_color: overlay_config
                 .processing_color
                 .unwrap_or(self.processing_color),
+            error_tag_enable: overlay_config
+                .error_tag_enable
+                .unwrap_or(self.error_tag_enable),
+            error_tag: overlay_config.error_tag.unwrap_or(self.error_tag),
+            error_color: overlay_config.error_color.unwrap_or(self.error_color),
             finished_tag: overlay_config.finished_tag.unwrap_or(self.finished_tag),
             finished_color: overlay_config.finished_color.unwrap_or(self.finished_color),
             tag_user_name: overlay_config.tag_user_name.unwrap_or(self.tag_user_name),
@@ -109,6 +123,11 @@ impl OverlayConfig {
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),
             finished_color: std::env::var("FINSHED_TAG_COLOR").ok(),
+            error_tag_enable: std::env::var("ERROR_TAG_ENABLE")
+                .ok()
+                .and_then(|boolean| boolean.parse().ok()),
+            error_tag: std::env::var("ERROR_TAG_NAME").ok(),
+            error_color: std::env::var("ERROR_TAG_COLOR").ok(),
             tag_user_name: std::env::var("PAPERLESS_USER").ok(),
             model: std::env::var("GGUF_MODEL_PATH").ok(),
             num_gpu_layers: std::env::var("NUM_GPU_LAYERS")
@@ -123,11 +142,6 @@ impl OverlayConfig {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::new(
-            "🧠 processing",
-            "🏷️ finished",
-            "user",
-            "/usr/share/paperless-field-extractor/model.gguf",
-        )
+        Self::new("user", "/usr/share/paperless-field-extractor/model.gguf")
     }
 }

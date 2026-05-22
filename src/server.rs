@@ -14,6 +14,7 @@ use actix_web::{
     web::{self, Data},
 };
 use itertools::Itertools;
+use log::error;
 use once_cell::sync::Lazy;
 use paperless_api_client::{
     Client,
@@ -143,7 +144,7 @@ async fn handle_custom_field_prediction(
                 .collect()
         })
     {
-        requests::get_custom_fields_by_id( 
+        requests::get_custom_fields_by_id(
             api_client,
             cf_ids
         ) .await
@@ -613,9 +614,10 @@ async fn document_updater(
     >,
 ) {
     let mut defered_doc_updates: BTreeMap<i64, Vec<ProcessingType>> = BTreeMap::new();
+    let mut document_processing_errors: BTreeMap<i64, Vec<DocumentProcessingError>> =
+        BTreeMap::new();
 
     while let Some(doc_update) = document_update_channel.recv().await {
-        let mut _maybe_error = None;
         let same_doc_in_queue_again;
         let doc_req = match doc_update {
             Ok((doc_req, queued_again)) => {
@@ -624,7 +626,16 @@ async fn document_updater(
             }
             Err((err, doc_req, queued_again)) => {
                 same_doc_in_queue_again = queued_again;
-                _maybe_error = Some(err);
+                if let std::collections::btree_map::Entry::Vacant(e) =
+                    document_processing_errors.entry(doc_req.document.id)
+                {
+                    e.insert(vec![err]);
+                } else if let Some(v) = document_processing_errors
+                    .get_mut(&doc_req.document.id)
+                    .as_mut()
+                {
+                    v.push(err);
+                }
                 doc_req
             }
         };
@@ -679,7 +690,11 @@ async fn document_updater(
                 }
             }
 
-            let _ = requests::processed_doc_update(
+            // copy tag list before update and include error tag
+            // will only be used if documents has errors or update fails for some reason
+            let mut updated_tag_with_error = updated_doc_tags.clone();
+
+            let update_result = requests::processed_doc_update(
                 &mut api_client,
                 doc_req.document.id,
                 updated_doc_tags,
@@ -691,6 +706,37 @@ async fn document_updater(
                 log::error!("{err}");
                 err
             });
+
+            // error tag is only defined when features is enabled
+            if let Some(ref error_tag) = status_tags.error
+                // and if there where errrors during processing
+                // or if the request updating the document failed
+                && (!document_processing_errors
+                    .get(&doc_req.document.id)
+                    .is_none_or(|v| v.is_empty())
+                    || update_result.is_err())
+            {
+                updated_tag_with_error.push(error_tag.id);
+                let _ = requests::processed_doc_update(
+                    &mut api_client,
+                    doc_req.document.id,
+                    updated_tag_with_error,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|err| {
+                    // if even updating tags fails something is very wrong
+                    error!(
+                        "Error updating Tags for Document with id {}:\n{err:#?}\n\n This probably warrants a bug report!",
+                        doc_req.document.id
+                    )
+                });
+            }
+
+            // if document has been synced there is no reason to hold on to the last updates
+            defered_doc_updates.remove(&doc_req.document.id);
+            document_processing_errors.remove(&doc_req.document.id);
         } else {
             // remember how document has been processed until now for defered update later
             if let std::collections::btree_map::Entry::Vacant(e) =
@@ -844,12 +890,14 @@ async fn document_request_funnel(
 struct PaperlessStatusTags {
     processing: Tag,
     finished: Tag,
+    error: Option<Tag>,
 }
 
 pub async fn run_server(
     config: Config,
     processing_tag: Tag,
     finished_tag: Tag,
+    error_tag: Option<Tag>,
     paperless_api_client: Client,
 ) -> Result<(), std::io::Error> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<DocumentProcessingRequest>();
@@ -858,6 +906,7 @@ pub async fn run_server(
     let status_tags = PaperlessStatusTags {
         processing: processing_tag,
         finished: finished_tag,
+        error: error_tag,
     };
 
     let doc_to_process_queue = spawn(document_request_funnel(rx));

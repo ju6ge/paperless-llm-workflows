@@ -83,6 +83,12 @@ processing_color = "#ffe000"
 finished_tag = "🏷️ finished"
 # corresponding env var `FINISHED_TAG_COLOR`, display color of the tag that is show when a document has been fully processed
 finished_color = "#40aebf"
+# corresponding env var "ERROR_TAG_ENABLE", control if error tags are used
+error_tag_enable = false
+# corresponding env var `ERROR_TAG_NAME`, display name of the tag that is shown when a document processing ran into an error
+error_tag = "⚠️ error"
+# corresponding env var `ERROR_TAG_COLOR`, display color of the tag that is shown when a document processing ran into an error
+error_color = "#e45858"
 # corresponding env var `PAPERLESS_USER`, default user to use when creating processing and finshed tags on inital connection
 tag_user_name = "user"
 ```

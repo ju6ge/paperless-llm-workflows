@@ -80,6 +80,18 @@ struct Args {
     #[clap(long, global = true)]
     finished_color: Option<String>,
 
+    /// Enable error doc tag to indicate the was an error in the llm workflow pipeline
+    #[clap(long, action)]
+    enable_error_tag: bool,
+
+    /// Display name of the error tag
+    #[clap(long, global = true)]
+    error_tag: Option<String>,
+
+    /// Display color of the error tag
+    #[clap(long, global = true)]
+    error_color: Option<String>,
+
     /// Default user for tag creation
     #[clap(long, global = true)]
     tag_user_name: Option<String>,
@@ -127,6 +139,9 @@ async fn async_main() {
             processing_color: args.processing_color,
             finished_tag: args.finished_tag,
             finished_color: args.finished_color,
+            error_tag_enable: Some(args.enable_error_tag),
+            error_tag: args.error_tag,
+            error_color: args.error_color,
             tag_user_name: args.tag_user_name,
         });
 
@@ -242,6 +257,31 @@ async fn async_main() {
 
     let processing_tag = processing_tag.unwrap();
     let finished_tag = finished_tag.unwrap();
+    let error_tag = if config.error_tag_enable {
+        if !tags.iter().any(|t| t.name == config.error_tag) {
+            requests::create_tag(
+                &mut api_client,
+                user,
+                &config.error_tag,
+                &config.error_color,
+            )
+            .await
+            .inspect_err(|err| {
+                log::error!("could not create finished tag: {err}");
+            })
+            .inspect(|_| {
+                log::info!(
+                    "created processing tag `{}` to paperless ",
+                    config.error_tag
+                );
+            })
+            .ok()
+        } else {
+            tags.iter().find(|t| t.name == config.finished_tag).cloned()
+        }
+    } else {
+        None
+    };
 
-    let _ = run_server(config, processing_tag, finished_tag, api_client).await;
+    let _ = run_server(config, processing_tag, finished_tag, error_tag, api_client).await;
 }
