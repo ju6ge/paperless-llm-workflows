@@ -691,6 +691,9 @@ async fn document_updater(
                 log::error!("{err}");
                 err
             });
+
+            // if document has been synced there is no reason to hold on to the last updates
+            defered_doc_updates.remove(&doc_req.document.id);
         } else {
             // remember how document has been processed until now for defered update later
             if let std::collections::btree_map::Entry::Vacant(e) =
