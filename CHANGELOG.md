@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- more robust fetching of custom_field types in case of newly added custom field types
+
 ## [0.3.4 - 2026-05-14]
 
 ### Fixed 
