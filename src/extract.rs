@@ -2,9 +2,9 @@ use llama_cpp_2::LlamaCppError;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos};
 use llama_cpp_2::sampling::LlamaSampler;
 use schemars::Schema;
 use serde_json::Value;
@@ -110,7 +110,7 @@ impl LLModelExtractor {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
-            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"], ),
+            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
             LlamaSampler::min_p(0.01, 64),
             LlamaSampler::temp(0.1),
             LlamaSampler::dist(rand::random()),
@@ -136,8 +136,15 @@ impl LLModelExtractor {
             batch.clear();
             for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
                 // llama_decode will output logits only for the last token of the prompt
-                let is_last = (batch_i*batch_chunk_size + i) == last_index as usize;
-                batch.add(*token, (batch_i*batch_chunk_size + i) as i32, &[0], is_last).unwrap();
+                let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
+                batch
+                    .add(
+                        *token,
+                        (batch_i * batch_chunk_size + i) as i32,
+                        &[0],
+                        is_last,
+                    )
+                    .unwrap();
             }
             ctx.decode(&mut batch).expect("llama_decode() failed");
         }
@@ -159,7 +166,10 @@ impl LLModelExtractor {
                     break;
                 }
 
-                let output_string = self.model.token_to_piece(token, &mut decoder, true, None).unwrap();
+                let output_string = self
+                    .model
+                    .token_to_piece(token, &mut decoder, true, None)
+                    .unwrap();
                 if dry_run {
                     print!("{output_string}");
                     if n_cur % 100 == 0 {

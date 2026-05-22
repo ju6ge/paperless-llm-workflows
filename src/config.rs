@@ -78,7 +78,9 @@ impl Config {
             processing_color: overlay_config
                 .processing_color
                 .unwrap_or(self.processing_color),
-            error_tag_enable: overlay_config.error_tag_enable.unwrap_or(self.error_tag_enable),
+            error_tag_enable: overlay_config
+                .error_tag_enable
+                .unwrap_or(self.error_tag_enable),
             error_tag: overlay_config.error_tag.unwrap_or(self.error_tag),
             error_color: overlay_config.error_color.unwrap_or(self.error_color),
             finished_tag: overlay_config.finished_tag.unwrap_or(self.finished_tag),
@@ -121,7 +123,9 @@ impl OverlayConfig {
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),
             finished_color: std::env::var("FINSHED_TAG_COLOR").ok(),
-            error_tag_enable: std::env::var("ERROR_TAG_ENABLE").ok().and_then(|boolean| boolean.parse().ok()),
+            error_tag_enable: std::env::var("ERROR_TAG_ENABLE")
+                .ok()
+                .and_then(|boolean| boolean.parse().ok()),
             error_tag: std::env::var("ERROR_TAG_NAME").ok(),
             error_color: std::env::var("ERROR_TAG_COLOR").ok(),
             tag_user_name: std::env::var("PAPERLESS_USER").ok(),
@@ -138,9 +142,6 @@ impl OverlayConfig {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::new(
-            "user",
-            "/usr/share/paperless-field-extractor/model.gguf",
-        )
+        Self::new("user", "/usr/share/paperless-field-extractor/model.gguf")
     }
 }
