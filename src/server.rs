@@ -844,12 +844,14 @@ async fn document_request_funnel(
 struct PaperlessStatusTags {
     processing: Tag,
     finished: Tag,
+    error: Option<Tag>,
 }
 
 pub async fn run_server(
     config: Config,
     processing_tag: Tag,
     finished_tag: Tag,
+    error_tag: Option<Tag>,
     paperless_api_client: Client,
 ) -> Result<(), std::io::Error> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<DocumentProcessingRequest>();
@@ -858,6 +860,7 @@ pub async fn run_server(
     let status_tags = PaperlessStatusTags {
         processing: processing_tag,
         finished: finished_tag,
+        error: error_tag
     };
 
     let doc_to_process_queue = spawn(document_request_funnel(rx));
