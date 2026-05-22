@@ -48,14 +48,14 @@ enum OverlayConfigError {
 }
 
 impl Config {
-    pub fn new<S: ToString>(processing_tag: S, finished_tag: S, tag_user: S, model: S) -> Self {
+    pub fn new<S: ToString>(tag_user: S, model: S) -> Self {
         Self {
             host: "0.0.0.0".to_string(),
             port: 8123,
             paperless_server: "https://example-paperless.domain".to_string(),
-            processing_tag: processing_tag.to_string(),
+            processing_tag: "🧠 processing".to_string(),
             processing_color: "#ffe000".to_string(),
-            finished_tag: finished_tag.to_string(),
+            finished_tag: "🏷️ finished".to_string(),
             finished_color: "#40aebf".to_string(),
             tag_user_name: tag_user.to_string(),
             error_tag_enable: false, // for no this feature should be opt in
@@ -139,8 +139,6 @@ impl OverlayConfig {
 impl Default for Config {
     fn default() -> Self {
         Self::new(
-            "🧠 processing",
-            "🏷️ finished",
             "user",
             "/usr/share/paperless-field-extractor/model.gguf",
         )
