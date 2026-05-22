@@ -82,7 +82,7 @@ pub async fn fetch_tag_by_id_or_name(
 ) -> Option<Tag> {
     let found_tags: Vec<Tag> = client
         .tags()
-        .list_stream(None, id, None, None, None, name, None, None, None)
+        .list_stream(None, id, None, None, None, None, name, None, None, None)
         .filter_map(async |tag_result| {
             tag_result
                 .map_err(|err| {
@@ -139,6 +139,7 @@ pub async fn get_all_tags(client: &mut Client) -> Vec<Tag> {
     client
         .tags()
         .list_stream(
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),
@@ -329,6 +330,7 @@ pub(crate) async fn create_tag(
             is_inbox_tag: Some(false),
             owner: tag_user.map(|u| u.id),
             set_permissions: None,
+            parent: None,
         })
         .await
 }

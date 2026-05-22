@@ -82,6 +82,16 @@ impl FieldExtract {
                 })
             }
             paperless_api_client::types::DataTypeEnum::String => {
+                let mut parsed_value: String = serde_json::from_value(self.value.clone())?;
+                // string custom fields in paperless may only be at most 128 chars
+                parsed_value.truncate(127);
+                parsed_value.push('…');
+                Ok(CustomFieldInstance {
+                    value: Some(Value::from(parsed_value)),
+                    field: custom_field_spec.id,
+                })
+            }
+            paperless_api_client::types::DataTypeEnum::Longtext => {
                 let _parsed_value: String = serde_json::from_value(self.value.clone())?;
                 Ok(CustomFieldInstance {
                     value: Some(self.value.clone()),
@@ -186,7 +196,14 @@ struct GuideDef {
 /// fields definition.
 fn guide_value_from_custom_field(cf: &CustomField) -> Option<GuideDef> {
     match cf.data_type {
-        DataTypeEnum::String
+        DataTypeEnum::String => {
+            // expect the date as rfc3339 format
+            Some(GuideDef {
+                name: "max_length".to_string(),
+                value: json!(128),
+            })
+        }
+        DataTypeEnum::Longtext
         | DataTypeEnum::Boolean
         | DataTypeEnum::Integer
         | DataTypeEnum::Float
@@ -298,6 +315,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     }
     let field_schema = match cf.data_type {
         paperless_api_client::types::DataTypeEnum::String => schema_for!(String),
+        paperless_api_client::types::DataTypeEnum::Longtext => schema_for!(String),
         paperless_api_client::types::DataTypeEnum::Date => schema_for!(chrono::NaiveDate),
         paperless_api_client::types::DataTypeEnum::Boolean => schema_for!(bool),
         paperless_api_client::types::DataTypeEnum::Integer => schema_for!(i64),
