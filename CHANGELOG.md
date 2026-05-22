@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - added error tag configuration to enable commuicated processing failues as tag state to paperless instance relevant issue #5 
+- support for longtext custom_field types
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
+- trunkate string custom_field values to 128 chars
 
 ## [0.3.4 - 2026-05-14]
 
