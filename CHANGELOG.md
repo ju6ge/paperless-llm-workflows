@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - support for longtext custom_field types
 - added feature flag to build with `rocm` compute backend
 - added api field to custom field filling endpoint to easily exclude custom fields from being filled
+- webhook endpoint to enable title suggestion feature request #2
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
