@@ -210,6 +210,11 @@ pub(crate) enum ProgressUpdate {
         total: usize,
         cumulative_token_stats: TokenGenerationStats,
     },
+    /// per-document instantaneous token performance stats
+    TokenStats {
+        model_name: String,
+        doc_token_stats: TokenGenerationStats,
+    },
     /// intermediary or final benchmark result state
     BenchmarkResults {
         model_name: String,

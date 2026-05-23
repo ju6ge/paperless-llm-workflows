@@ -225,6 +225,9 @@ fn render_logs(frame: &mut Frame, logs: &Vec<ProgressUpdate>, area: Rect) {
             ProgressUpdate::Error { model_name, .. } => {
                 Line::raw(format!("Error for {model_name}")).style(Style::new().red())
             }
+            ProgressUpdate::TokenStats { model_name, .. } => {
+                Line::raw(format!("Token stats for {model_name}")).style(Style::new().yellow())
+            }
             ProgressUpdate::Finished { model_name } => {
                 Line::raw(format!("Benchmark finihed {model_name}")).style(Style::new().cyan())
             }
