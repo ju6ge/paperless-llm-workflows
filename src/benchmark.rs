@@ -28,7 +28,7 @@ use tokio::{
 
 use crate::{
     config::Config,
-    extract::LLModelExtractor,
+    extract::{LLModelExtractor, TokenGenerationStats},
     requests,
     tui::BenchmarkApp,
     types::{
@@ -99,6 +99,7 @@ pub(crate) struct SingleResult {
     benchmark_result: Value,
     success: bool,
     error: Option<String>,
+    token_stats: Option<TokenGenerationStats>,
 }
 
 #[derive(Tabled)]
@@ -288,6 +289,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                             .unwrap(),
                                         success: true,
                                         error: None,
+                                    token_stats: None,
                                     });
                                 } else {
                                     ctx.results.results.push(SingleResult {
@@ -298,6 +300,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                             .unwrap(),
                                         success: false,
                                         error: None,
+                                    token_stats: None,
                                     });
                                 }
                             }
@@ -309,6 +312,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                                     success: false,
                                     error: Some(err.to_string()),
+                                token_stats: None,
                                 });
                             }
                         }
@@ -321,6 +325,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                             benchmark_result: Value::Null,
                             success: false,
                             error: Some(model_err.to_string()),
+                        token_stats: None,
                         });
                     }
                 }
@@ -362,6 +367,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                     .unwrap(),
                                 success: true,
                                 error: None,
+                            token_stats: None,
                             });
                         } else {
                             ctx.results.results.push(SingleResult {
@@ -375,6 +381,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                     .unwrap(),
                                 success: false,
                                 error: None,
+                            token_stats: None,
                             });
                         }
                     }
@@ -389,6 +396,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                             benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                             success: false,
                             error: Some(err.to_string()),
+                        token_stats: None,
                         });
                     }
                 }
@@ -402,6 +410,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                     benchmark_result: Value::Null,
                     success: false,
                     error: Some(model_error.to_string()),
+                token_stats: None,
                 });
             }
         }
@@ -443,6 +452,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: model_answer_value,
                         success: true,
                         error: None,
+                    token_stats: None,
                     });
                 } else {
                     ctx.results.results.push(SingleResult {
@@ -452,6 +462,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: model_answer_value,
                         success: false,
                         error: None,
+                    token_stats: None,
                     });
                 }
             }
@@ -463,6 +474,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                     benchmark_result: Value::Null,
                     success: false,
                     error: Some(model_err.to_string()),
+                token_stats: None,
                 });
             }
         }
@@ -492,6 +504,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             benchmark_result: model_answer_value,
                             success: true,
                             error: None,
+                        token_stats: None,
                         });
                     } else {
                         ctx.results.results.push(SingleResult {
@@ -501,6 +514,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             benchmark_result: model_answer_value,
                             success: false,
                             error: None,
+                        token_stats: None,
                         });
                     }
                 }
@@ -512,6 +526,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: Value::Null,
                         success: false,
                         error: Some(model_err.to_string()),
+                    token_stats: None,
                     });
                 }
             }
@@ -923,10 +938,10 @@ impl MultiBenchmarkParameters {
                                     .open(&error_path)
                                     .expect("Failed to create results file");
                                 let _ = writeln!(&mut file, "{err_msg}");
-                                let _ = tx_clone.send(ProgressUpdate::Error {
-                                    model_name: model_name.clone(),
-                                    error: err_msg,
-                                });
+                         let _ = tx_clone.send(ProgressUpdate::Error {
+                                     model_name: model_name.clone(),
+                                     error: err_msg,
+                                 });
                                 let _ = tx_clone.send(ProgressUpdate::Finished {
                                     model_name: model_name.clone(),
                                 });
