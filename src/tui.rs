@@ -106,6 +106,12 @@ impl BenchmarkApp {
                         benchmark_data.result = Some(results.clone())
                     }
                 }
+                ProgressUpdate::TokenStats { model_name, doc_token_stats } => {
+                    let mut progress_data = self.benchmark_progress.write().await;
+                    if let Some(benchmark_data) = progress_data.get_mut(model_name) {
+                        benchmark_data.latest_token_stats = Some(doc_token_stats.clone());
+                    }
+                }
                 _ => { /* nothing to do here */ }
             }
             let mut log_messages = self.log_messages.write().await;
