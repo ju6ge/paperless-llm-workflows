@@ -247,12 +247,9 @@ fn filename_to_result_name(path: &Path) -> String {
     result_name.trim_matches('-').to_string()
 }
 
-fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
-    // unused variables - these are parameters that are not used in the function
+  fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
     let valid_doc_state = ctx.doc.clone();
     let mut test_doc_state = ctx.doc.clone();
-    // make sure custom fields are unpopulated for the document data used
-    // for testing the extraction of custom fields
     test_doc_state.custom_fields = None;
 
     if let Some(valid_doc_cfs) = &valid_doc_state.custom_fields {
@@ -271,16 +268,19 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
         {
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
+                let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+                let mut last_stats: Option<TokenGenerationStats> = None;
 
-                match ctx.model.extract(&doc_data, &cf_grammar, false, None) {
+                match ctx.model.extract(&doc_data, &cf_grammar, false, Some(stats_tx)) {
                     Ok(extracted_value) => {
+                        for stats in stats_rx.iter() {
+                            last_stats = Some(stats);
+                        }
                         let field_extract: FieldExtract = serde_json::from_value(extracted_value)
                             .expect("grammar forced output to match type");
                         match field_extract.to_custom_field_instance(&doc_cf.0) {
                             Ok(extracted_cfi) => {
                                 if extracted_cfi == *doc_cf.1 {
-                                    // the extracted value corresponds exactly to the value of the validated documen
-                                    // so this is the only case that is considered a success
                                     ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: ctx.doc.id,
@@ -289,7 +289,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                             .unwrap(),
                                         success: true,
                                         error: None,
-                                    token_stats: None,
+                                        token_stats: last_stats,
                                     });
                                 } else {
                                     ctx.results.results.push(SingleResult {
@@ -300,7 +300,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                             .unwrap(),
                                         success: false,
                                         error: None,
-                                    token_stats: None,
+                                        token_stats: last_stats,
                                     });
                                 }
                             }
@@ -312,12 +312,15 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                                     success: false,
                                     error: Some(err.to_string()),
-                                token_stats: None,
+                                    token_stats: last_stats,
                                 });
                             }
                         }
                     }
                     Err(model_err) => {
+                        for stats in stats_rx.iter() {
+                            last_stats = Some(stats);
+                        }
                         ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                             doc_id: ctx.doc.id,
@@ -325,7 +328,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                             benchmark_result: Value::Null,
                             success: false,
                             error: Some(model_err.to_string()),
-                        token_stats: None,
+                            token_stats: last_stats,
                         });
                     }
                 }
@@ -334,10 +337,9 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
     }
 }
 
-fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
+ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
     let crrspndts_suggest_schema =
         crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
-    // unused variables - these are parameters that are not used in the function
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     if let Some(expected_correspondent) = ctx
@@ -346,11 +348,14 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
         .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
-        match ctx
-            .model
-            .extract(&doc_data, &crrspndts_suggest_schema, false, None)
-        {
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+        let mut last_stats: Option<TokenGenerationStats> = None;
+
+        match ctx.model.extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx)) {
             Ok(model_result_value) => {
+                for stats in stats_rx.iter() {
+                    last_stats = Some(stats);
+                }
                 let field_extract: FieldExtract = serde_json::from_value(model_result_value)
                     .expect("grammar enforces output matches type");
                 match field_extract.to_correspondent(&ctx.crrspndents.as_slice()) {
@@ -367,7 +372,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                     .unwrap(),
                                 success: true,
                                 error: None,
-                            token_stats: None,
+                                token_stats: last_stats,
                             });
                         } else {
                             ctx.results.results.push(SingleResult {
@@ -381,7 +386,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                     .unwrap(),
                                 success: false,
                                 error: None,
-                            token_stats: None,
+                                token_stats: last_stats,
                             });
                         }
                     }
@@ -396,12 +401,15 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                             benchmark_result: serde_json::to_value(&field_extract).unwrap(),
                             success: false,
                             error: Some(err.to_string()),
-                        token_stats: None,
+                            token_stats: last_stats,
                         });
                     }
                 }
             }
             Err(model_error) => {
+                for stats in stats_rx.iter() {
+                    last_stats = Some(stats);
+                }
                 ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                     doc_id: ctx.doc.id,
@@ -410,7 +418,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                     benchmark_result: Value::Null,
                     success: false,
                     error: Some(model_error.to_string()),
-                token_stats: None,
+                    token_stats: last_stats,
                 });
             }
         }
@@ -425,10 +433,9 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
 /// on the document metadata programmatically may be used. This means only data that
 /// is availible for every document, because otherwise this benchmark might become
 /// very depenendent on the paperless instances configuration
-fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
+ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
-    // simple question is the correspondent correct, only if doc has correspondent!
     if let Some(expected_correspondent) = ctx
         .doc
         .correspondent
@@ -440,8 +447,14 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-        match ctx.model.extract(&doc_data, &question_schema, false, None) {
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+        let mut last_stats: Option<TokenGenerationStats> = None;
+
+        match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
             Ok(model_answer_value) => {
+                for stats in stats_rx.iter() {
+                    last_stats = Some(stats);
+                }
                 let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
                     .expect("grammar constrains output to match type");
                 if model_decision.answer_bool {
@@ -452,7 +465,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: model_answer_value,
                         success: true,
                         error: None,
-                    token_stats: None,
+                        token_stats: last_stats,
                     });
                 } else {
                     ctx.results.results.push(SingleResult {
@@ -462,11 +475,14 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: model_answer_value,
                         success: false,
                         error: None,
-                    token_stats: None,
+                        token_stats: last_stats,
                     });
                 }
             }
             Err(model_err) => {
+                for stats in stats_rx.iter() {
+                    last_stats = Some(stats);
+                }
                 ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
                     doc_id: ctx.doc.id,
@@ -474,12 +490,11 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                     benchmark_result: Value::Null,
                     success: false,
                     error: Some(model_err.to_string()),
-                token_stats: None,
+                    token_stats: last_stats,
                 });
             }
         }
 
-        // only if there is only one possible correspondent, then this case will not run, because there is no false correspondent to select from …
         if let Some(random_incorrect_correspondent) = ctx
             .crrspndents
             .iter()
@@ -491,8 +506,14 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                 random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
-            match ctx.model.extract(&doc_data, &question_schema, false, None) {
+            let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+            let mut last_stats: Option<TokenGenerationStats> = None;
+
+            match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
                 Ok(model_answer_value) => {
+                    for stats in stats_rx.iter() {
+                        last_stats = Some(stats);
+                    }
                     let model_decision: Decision =
                         serde_json::from_value(model_answer_value.clone())
                             .expect("grammar constrains output to match type");
@@ -504,7 +525,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             benchmark_result: model_answer_value,
                             success: true,
                             error: None,
-                        token_stats: None,
+                            token_stats: last_stats,
                         });
                     } else {
                         ctx.results.results.push(SingleResult {
@@ -514,11 +535,14 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             benchmark_result: model_answer_value,
                             success: false,
                             error: None,
-                        token_stats: None,
+                            token_stats: last_stats,
                         });
                     }
                 }
                 Err(model_err) => {
+                    for stats in stats_rx.iter() {
+                        last_stats = Some(stats);
+                    }
                     ctx.results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
                         doc_id: ctx.doc.id,
@@ -526,7 +550,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         benchmark_result: Value::Null,
                         success: false,
                         error: Some(model_err.to_string()),
-                    token_stats: None,
+                        token_stats: last_stats,
                     });
                 }
             }
