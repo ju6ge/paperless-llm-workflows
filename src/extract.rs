@@ -21,6 +21,9 @@ use gbnf::{self, GrammarItem, NonTerminalSymbol, ProductionItem, RepetitionType,
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+/// Minimum interval between cumulative stats updates sent via the channel.
+const STATS_UPDATE_INTERVAL_MS: u128 = 5_000;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TokenGenerationStats {
     pub prompt_tokens: usize,
@@ -392,6 +395,7 @@ impl LLModelExtractor {
             forward_passes: 0,
         };
 
+        let mut stats_last_send = Instant::now();
         while n_cur as usize <= n_len {
             // Fast path: probe with first-char index (~50-500 tokens)
             let inject_start = Instant::now();
@@ -458,8 +462,19 @@ impl LLModelExtractor {
                 batch.add(token, n_cur, &[0], true).unwrap();
                 n_cur += 1;
             }
+            if _stats_tx.is_some()
+                && stats_last_send.elapsed().as_millis() >= STATS_UPDATE_INTERVAL_MS
+            {
+                stats.injected_tokens = injected_tokens;
+                stats.injected_elapsed_ms = injected_elapsed_ms;
+                stats.sampled_tokens = sampled_tokens;
+                stats.sampled_elapsed_ms = sampled_elapsed_ms;
+                stats.forward_passes = forward_passes;
+                let _ = _stats_tx.as_ref().unwrap().send(stats.clone());
+                stats_last_send = Instant::now();
+            }
         }
-        // Send cumulative stats update after each sampled token
+        // Send final cumulative stats
         if let Some(ref tx) = _stats_tx {
             stats.injected_tokens = injected_tokens;
             stats.injected_elapsed_ms = injected_elapsed_ms;
@@ -468,6 +483,7 @@ impl LLModelExtractor {
             stats.forward_passes = forward_passes;
             let _ = tx.send(stats);
         }
+
         if dry_run {
             println!(
                 "\nstats: forward_passes={} injected={} sampled={}",
