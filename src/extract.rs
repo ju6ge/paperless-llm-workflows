@@ -6,9 +6,9 @@ use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::token::data::LlamaTokenData;
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
-use llama_cpp_2::token::LlamaToken;
 use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -72,10 +72,8 @@ pub struct FirstCharIndex {
     representatives: Vec<LlamaToken>,
 }
 
-fn build_first_char_index(
-    model: &LlamaModel,
-    decoder: &mut encoding_rs::Decoder,
-) -> FirstCharIndex {
+
+fn build_first_char_index(model: &LlamaModel) -> FirstCharIndex {
     let vocab_size = model.n_vocab();
     let mut map: HashMap<char, Vec<LlamaToken>> = HashMap::new();
     let mut reps: Vec<LlamaToken> = Vec::new();
@@ -83,14 +81,15 @@ fn build_first_char_index(
 
     for i in 0..vocab_size {
         let tok = LlamaToken(i);
-        let piece = match model.token_to_piece(tok, decoder, true, None) {
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let piece = match model.token_to_piece(tok, &mut decoder, true, None) {
             Ok(p) => p,
             Err(_) => continue,
         };
         let first = piece.chars().next();
         if let Some(c) = first {
             if seen_chars.insert(c) {
-                reps.push(tok);
+                reps.push(model.str_to_token(&c.to_string(), AddBos::Never).unwrap()[0]);
             }
             map.entry(c).or_default().push(tok);
         }
@@ -177,9 +176,10 @@ fn try_grammar_based_deterministic_inject(
 
     let winning_rep = valid_reps[0];
 
-    let winning_char = index.map.iter().find_map(|(&c, tokens)| {
-        tokens.iter().any(|t| *t == winning_rep).then_some(c)
-    })?;
+    let winning_char = index
+        .map
+        .iter()
+        .find_map(|(&c, tokens)| tokens.iter().any(|t| *t == winning_rep).then_some(c))?;
 
     let candidate_tokens = index.map.get(&winning_char)?;
 
@@ -247,7 +247,7 @@ impl LLModelExtractor {
             .unwrap()
             .to_string();
 
-        let first_char_index = build_first_char_index(&model, &mut decoder);
+        let first_char_index = build_first_char_index(&model);
 
         Ok(Self {
             backend,
@@ -265,6 +265,7 @@ impl LLModelExtractor {
         dry_run: bool,
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
+        let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
         let mut sampler = LlamaSampler::chain_simple([
             LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
             LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
@@ -310,16 +311,57 @@ impl LLModelExtractor {
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
         let mut output = String::new();
+        let mut forward_passes = 0u64;
+        let mut injected_tokens = 0u64;
+        let mut sampled_tokens = 0u64;
+
         while n_cur as usize <= n_len {
-            // sample the next token
-            {
+            // Fast path: probe with first-char index (~50-500 tokens)
+            if let Some(injected) = try_grammar_based_deterministic_inject(
+                &grammar_sampler,
+                &self.first_char_index,
+                &self.model,
+                &mut decoder,
+            ) {
+                grammar_sampler.accept(injected);
+                sampler.accept(injected);
+                injected_tokens += 1;
+
+                if injected == self.model.token_eos() {
+                    break;
+                }
+
+                let output_string = self
+                    .model
+                    .token_to_piece(injected, &mut decoder, true, None)
+                    .unwrap();
+                if dry_run {
+                    print!("{output_string}");
+                    let _ = std::io::stdout().flush();
+                }
+                output.push_str(&output_string);
+
+                batch.add(injected, n_cur, &[0], true).unwrap();
+                n_cur += 1;
+                continue;
+            } else {
+                // Decode batched deterministic tokens to advance context
+                if batch.n_tokens() > 0 {
+                    forward_passes += 1;
+                    ctx.decode(&mut batch).expect("failed to eval");
+                    batch.clear();
+                }
+                // Check EOS from last decode
+                if output.ends_with(&self.eos_string) {
+                    break;
+                }
+
+                // Sample a non-deterministic token
+                sampled_tokens += 1;
                 let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+                grammar_sampler.accept(token);
 
-                // grammar sampling alread accepts this so calling accept again leads to segfaults
-                //sampler.accept(token);
-
-                // is it an end of stream?
-                if token == self.model.token_eos() || output.ends_with(&self.eos_string) {
+                if token == self.model.token_eos() {
                     break;
                 }
 
@@ -329,20 +371,17 @@ impl LLModelExtractor {
                     .unwrap();
                 if dry_run {
                     print!("{output_string}");
-                    if n_cur % 100 == 0 {
-                        let _ = std::io::stdout().flush();
-                    }
+                    let _ = std::io::stdout().flush();
                 }
                 output.push_str(&output_string);
-
-                batch.clear();
                 batch.add(token, n_cur, &[0], true).unwrap();
+                n_cur += 1;
             }
-
-            n_cur += 1;
-
-            ctx.decode(&mut batch).expect("failed to eval");
         }
+        log::debug!(
+            "extraction stats: forward_passes={} injected={} sampled={}",
+            forward_passes, injected_tokens, sampled_tokens
+        );
         // remove eos token
         let output = output.replace(&self.eos_string, "");
         //println!("{output}");
