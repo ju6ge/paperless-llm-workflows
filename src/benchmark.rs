@@ -668,7 +668,17 @@ fn run_benchmark_for_document(
                 doc_id: doc.id,
                 progress: doc_index + 1,
                 total: total_docs,
-                cumulative_token_stats: cumulative_stats,
+                cumulative_token_stats: cumulative_stats.clone(),
+            })
+            .unwrap()
+        );
+
+        let _ = writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::to_string(&ProgressUpdate::TokenStats {
+                model_name: model_name.to_string(),
+                doc_token_stats: cumulative_stats,
             })
             .unwrap()
         );
