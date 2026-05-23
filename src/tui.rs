@@ -156,8 +156,8 @@ impl BenchmarkApp {
         let horizontal = Layout::horizontal([Fill(1); 2]);
         let [info_area, log_area] = horizontal.areas(content_area);
         let benchmark_size: u16 = ((benchmark_state.keys().len()) * 3 + 2) as u16;
-        let infos = Layout::vertical([Length(benchmark_size), Min(0)]);
-        let [progress_area, result_area] = infos.areas(info_area);
+        let infos = Layout::vertical([Length(benchmark_size), Length(5), Min(0)]);
+        let [progress_area, token_perf_area, result_area] = infos.areas(info_area);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::bordered().title(title))
@@ -166,6 +166,7 @@ impl BenchmarkApp {
         );
         render_logs(frame, log_messages, log_area);
         render_progess_bars(frame, benchmark_state, progress_area);
+        render_token_performance(frame, benchmark_state, token_perf_area);
         render_results(frame, benchmark_state, result_area);
     }
 
@@ -279,6 +280,38 @@ fn render_results(
 
     frame.render_widget(result_block, area);
     frame.render_widget(table, result_inner);
+}
+
+fn render_token_performance(
+    frame: &mut Frame,
+    benchmark_state: &BTreeMap<String, BenchmarkRunData>,
+    area: Rect,
+) {
+    let token_block = Block::bordered().title("Token Performance (t/s)");
+    let token_inner = token_block.inner(area);
+    let mut rows = vec![];
+    for (model_name, data) in benchmark_state.iter() {
+        if let Some(stats) = &data.latest_token_stats {
+            rows.push(Row::new(vec![
+                model_name.clone(),
+                format!("{:.1}", stats.prompt_tps()),
+                format!("{:.1}", stats.injected_tps()),
+                format!("{:.1}", stats.sampled_tps()),
+                format!("{:.1}", stats.overall_tps()),
+            ]));
+        }
+    }
+    let widths = [Constraint::Fill(3), Constraint::Fill(1), Constraint::Fill(1), Constraint::Fill(1), Constraint::Fill(1)];
+    let table = Table::new(rows, widths).header(Row::new(vec![
+        "Model",
+        "Prompt",
+        "Inject",
+        "Sample",
+        "Overall",
+    ]));
+
+    frame.render_widget(&token_block, area);
+    frame.render_widget(table, token_inner);
 }
 
 fn render_progess_bars(
