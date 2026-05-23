@@ -6,6 +6,8 @@ use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::sampling::LlamaSampler;
+use llama_cpp_2::token::data::LlamaTokenData;
+use llama_cpp_2::token::data_array::LlamaTokenDataArray;
 use schemars::Schema;
 use serde_json::Value;
 use std::io::Write;
@@ -48,6 +50,15 @@ fn gen_gbnf(schema: &schemars::Schema, eos_token: String) -> String {
         *rep_type = RepetitionType::One
     }
     gram.to_string()
+}
+
+fn collect_valid_tokens(data_array: &LlamaTokenDataArray) -> Vec<LlamaTokenData> {
+    data_array
+        .data
+        .iter()
+        .copied()
+        .filter(|td| !td.logit().is_infinite())
+        .collect()
 }
 
 #[derive(Debug, Error)]
