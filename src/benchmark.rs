@@ -208,6 +208,7 @@ pub(crate) enum ProgressUpdate {
         doc_id: i64,
         progress: usize,
         total: usize,
+        cumulative_token_stats: TokenGenerationStats,
     },
     /// intermediary or final benchmark result state
     BenchmarkResults {
@@ -568,7 +569,7 @@ fn run_benchmark_for_document(
     log_to_stdio: bool,
     doc_index: usize,
     total_docs: usize,
-) {
+) -> TokenGenerationStats {
     let mut ctx = BenchmarkContext {
         model,
         doc,
@@ -577,7 +578,8 @@ fn run_benchmark_for_document(
         results,
     };
 
-    // Run all benchmark types
+    let results_before = ctx.results.results.len();
+
     run_custom_field_benchmark(&mut ctx);
     if log_to_stdio {
         let _ = writeln!(
@@ -616,7 +618,14 @@ fn run_benchmark_for_document(
         );
     }
 
-    // Send stats update
+    // Accumulate token stats from newly added results
+    let mut cumulative_stats = TokenGenerationStats::new();
+    for r in ctx.results.results.iter().skip(results_before) {
+        if let Some(ref s) = r.token_stats {
+            cumulative_stats.add(s);
+        }
+    }
+
     if log_to_stdio {
         let _ = writeln!(
             std::io::stdout(),
@@ -626,10 +635,13 @@ fn run_benchmark_for_document(
                 doc_id: doc.id,
                 progress: doc_index + 1,
                 total: total_docs,
+                cumulative_token_stats: cumulative_stats,
             })
             .unwrap()
         );
     }
+
+    cumulative_stats
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -913,6 +925,7 @@ impl MultiBenchmarkParameters {
                             .dedup()
                             .count(),
                         total: doc_to_process.len(),
+                        cumulative_token_stats: TokenGenerationStats::new(),
                     });
                     let _ = tx_clone.send(ProgressUpdate::BenchmarkResults {
                         model_name: model_name.clone(),
@@ -1032,8 +1045,9 @@ pub(crate) fn benchmark_worker() {
         .unwrap()
     );
 
+    let mut overall_stats = TokenGenerationStats::new();
     for (i, doc) in benchmark_job_data.doc_to_process.iter().enumerate() {
-        run_benchmark_for_document(
+        let doc_stats = run_benchmark_for_document(
             &model_name,
             &mut model,
             doc,
@@ -1044,6 +1058,7 @@ pub(crate) fn benchmark_worker() {
             i,
             benchmark_job_data.doc_to_process.len(),
         );
+        overall_stats.add(&doc_stats);
     }
 
     // Send completion notification
