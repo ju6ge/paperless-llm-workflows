@@ -14,6 +14,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::Duration;
 
 use crate::benchmark::{BenchmarkResults, ProgressUpdate};
+use crate::extract::TokenGenerationStats;
 
 #[derive(Debug, Clone)]
 enum BenchmarkState {
@@ -28,6 +29,7 @@ struct BenchmarkRunData {
     result: Option<BenchmarkResults>,
     finished_docs: usize,
     total_docs: usize,
+    latest_token_stats: Option<TokenGenerationStats>,
 }
 
 impl BenchmarkRunData {
@@ -37,6 +39,7 @@ impl BenchmarkRunData {
             result: None,
             finished_docs: 0,
             total_docs,
+            latest_token_stats: None,
         }
     }
 }
