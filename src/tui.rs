@@ -156,7 +156,8 @@ impl BenchmarkApp {
         let horizontal = Layout::horizontal([Fill(1); 2]);
         let [info_area, log_area] = horizontal.areas(content_area);
         let benchmark_size: u16 = ((benchmark_state.keys().len()) * 3 + 2) as u16;
-        let infos = Layout::vertical([Length(benchmark_size), Length(5), Min(0)]);
+        let token_perf_size: u16 = (benchmark_state.keys().len() * 2 + 3) as u16;
+        let infos = Layout::vertical([Length(benchmark_size), Length(token_perf_size), Min(0)]);
         let [progress_area, token_perf_area, result_area] = infos.areas(info_area);
         frame.render_widget(
             Paragraph::new(text)
