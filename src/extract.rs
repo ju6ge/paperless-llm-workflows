@@ -204,7 +204,7 @@ fn try_grammar_based_deterministic_inject(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ModelError {
+pub enum ModelError {
     #[error(transparent)]
     FormatDeserializationError(#[from] serde_json::Error),
     #[error("Model has not been loaded!")]
@@ -213,7 +213,7 @@ pub(crate) enum ModelError {
     LlamaCppError(#[from] LlamaCppError),
 }
 
-pub(crate) struct LLModelExtractor {
+pub struct LLModelExtractor {
     backend: LlamaBackend,
     model: LlamaModel,
     ctx_params: LlamaContextParams,
@@ -378,10 +378,12 @@ impl LLModelExtractor {
                 n_cur += 1;
             }
         }
-        log::debug!(
-            "extraction stats: forward_passes={} injected={} sampled={}",
-            forward_passes, injected_tokens, sampled_tokens
-        );
+        if dry_run {
+            println!(
+                "\nstats: forward_passes={} injected={} sampled={}",
+                forward_passes, injected_tokens, sampled_tokens
+            );
+        }
         // remove eos token
         let output = output.replace(&self.eos_string, "");
         //println!("{output}");

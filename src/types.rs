@@ -13,7 +13,7 @@ pub(crate) struct CurrencyValue {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub(crate) struct FieldExtract {
+pub struct FieldExtract {
     /// this field is used to guide the model to extract the desired data
     /// during grammar generation the string will be set to a constant value
     /// with the content being the name of the custom field that is to be extracted
@@ -54,7 +54,7 @@ pub(crate) enum FieldError {
 }
 
 impl FieldExtract {
-    pub fn to_correspondent(
+    pub(crate) fn to_correspondent(
         &self,
         all_correspondents: &[Correspondent],
     ) -> Result<Correspondent, FieldError> {
@@ -66,7 +66,7 @@ impl FieldExtract {
             .ok_or(FieldError::CorrespondentNotFound(parsed_value))
             .cloned()
     }
-    pub fn to_custom_field_instance(
+    pub(crate) fn to_custom_field_instance(
         &self,
         custom_field_spec: &CustomField,
     ) -> Result<CustomFieldInstance, FieldError> {
