@@ -135,6 +135,74 @@ fn find_longest_prefix_token(
     if is_prefix_chain { Some(longest) } else { None }
 }
 
+/// First-char probing: use a tiny array of representative tokens (one per
+/// first Unicode char) to ask the grammar sampler which first chars are
+/// valid.  If exactly one first char survives, build a filtered array of
+/// all tokens with that first char and apply grammar again.
+fn try_grammar_based_deterministic_inject(
+    grammar_sampler: &LlamaSampler,
+    index: &FirstCharIndex,
+    model: &LlamaModel,
+    decoder: &mut encoding_rs::Decoder,
+) -> Option<LlamaToken> {
+    if index.representatives.is_empty() {
+        return None;
+    }
+
+    let rep_data: Vec<LlamaTokenData> = index
+        .representatives
+        .iter()
+        .map(|&t| LlamaTokenData::new(t, 0.0, 0.0))
+        .collect();
+    let mut rep_array = LlamaTokenDataArray::new(rep_data, false);
+
+    grammar_sampler.apply(&mut rep_array);
+
+    let valid_reps: Vec<LlamaToken> = rep_array
+        .data
+        .iter()
+        .filter(|td| !td.logit().is_infinite())
+        .map(|td| td.id())
+        .collect();
+
+    let n_valid = valid_reps.len();
+
+    if n_valid == 0 {
+        return None;
+    }
+
+    if n_valid > 1 {
+        return None;
+    }
+
+    let winning_rep = valid_reps[0];
+
+    let winning_char = index.map.iter().find_map(|(&c, tokens)| {
+        tokens.iter().any(|t| *t == winning_rep).then_some(c)
+    })?;
+
+    let candidate_tokens = index.map.get(&winning_char)?;
+
+    if candidate_tokens.is_empty() {
+        return None;
+    }
+
+    if candidate_tokens.len() == 1 {
+        return Some(candidate_tokens[0]);
+    }
+
+    let narrowed_data: Vec<LlamaTokenData> = candidate_tokens
+        .iter()
+        .map(|&t| LlamaTokenData::new(t, 0.0, 0.0))
+        .collect();
+    let mut narrowed_array = LlamaTokenDataArray::new(narrowed_data, false);
+
+    grammar_sampler.apply(&mut narrowed_array);
+
+    let valid = collect_valid_tokens(&narrowed_array);
+    find_longest_prefix_token(&valid, model, decoder)
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum ModelError {
     #[error(transparent)]
