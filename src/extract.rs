@@ -352,15 +352,13 @@ impl LLModelExtractor {
         let n_len = tokens_list.len() + 4096;
 
         let batch_chunk_size: usize = 512;
-        // create a llama_batch with size 512
-        // we use this object to submit token data for decoding
         let mut batch = LlamaBatch::new(batch_chunk_size, 1);
 
+        let prompt_start = Instant::now();
         let last_index = tokens_list.len() as i32 - 1;
         for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
             batch.clear();
             for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
-                // llama_decode will output logits only for the last token of the prompt
                 let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
                 batch
                     .add(
@@ -374,16 +372,29 @@ impl LLModelExtractor {
             ctx.decode(&mut batch).expect("llama_decode() failed");
         }
         batch.clear();
+        let prompt_elapsed_ms = prompt_start.elapsed().as_secs_f64() * 1_000.0;
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
         let mut output = String::new();
         let mut forward_passes = 0u64;
         let mut injected_tokens = 0u64;
+        let mut injected_elapsed_ms = 0.0f64;
         let mut sampled_tokens = 0u64;
+        let mut sampled_elapsed_ms = 0.0f64;
+        let mut stats = TokenGenerationStats {
+            prompt_tokens: tokens_list.len(),
+            prompt_elapsed_ms,
+            injected_tokens: 0,
+            injected_elapsed_ms: 0.0,
+            sampled_tokens: 0,
+            sampled_elapsed_ms: 0.0,
+            forward_passes: 0,
+        };
 
         while n_cur as usize <= n_len {
             // Fast path: probe with first-char index (~50-500 tokens)
+            let inject_start = Instant::now();
             if let Some(injected) = try_grammar_based_deterministic_inject(
                 &grammar_sampler,
                 &self.first_char_index,
@@ -393,6 +404,7 @@ impl LLModelExtractor {
                 grammar_sampler.accept(injected);
                 sampler.accept(injected);
                 injected_tokens += 1;
+                injected_elapsed_ms += inject_start.elapsed().as_secs_f64() * 1_000.0;
 
                 if injected == self.model.token_eos() {
                     break;
@@ -424,9 +436,11 @@ impl LLModelExtractor {
                 }
 
                 // Sample a non-deterministic token
+                let sample_start = Instant::now();
                 sampled_tokens += 1;
                 let token = sampler.sample(&ctx, batch.n_tokens() - 1);
                 grammar_sampler.accept(token);
+                sampled_elapsed_ms += sample_start.elapsed().as_secs_f64() * 1_000.0;
 
                 if token == self.model.token_eos() {
                     break;
@@ -444,6 +458,15 @@ impl LLModelExtractor {
                 batch.add(token, n_cur, &[0], true).unwrap();
                 n_cur += 1;
             }
+        }
+        // Send cumulative stats update after each sampled token
+        if let Some(ref tx) = _stats_tx {
+            stats.injected_tokens = injected_tokens;
+            stats.injected_elapsed_ms = injected_elapsed_ms;
+            stats.sampled_tokens = sampled_tokens;
+            stats.sampled_elapsed_ms = sampled_elapsed_ms;
+            stats.forward_passes = forward_passes;
+            let _ = tx.send(stats);
         }
         if dry_run {
             println!(
