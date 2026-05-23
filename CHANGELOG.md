@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - added error tag configuration to enable commuicated processing failues as tag state to paperless instance relevant issue #5 
 - support for longtext custom_field types
+- fastly improved token generation performance during grammar sampling with deterministic token injection logic
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
