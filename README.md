@@ -43,7 +43,7 @@ can use to overwrite what tag will be assigned once the processing step has comp
 
 ![LLM Workflow Sequence](./workflow_api_sequence.svg)
 
-As of now the following llm workflows are availible:
+As of now the following llm workflows are available:
 - `/fill/custom_fields`: For all supported custom fields datatypes extract value from document content
 - `/suggest/correspondent`: Suggest document correspondent by using reasoning
 - `/decision`: Ask a true or false question about the document and set tags depending on result
@@ -53,7 +53,7 @@ As of now the following llm workflows are availible:
 
 Configuration of the software is possible via a configuration file at `/etc/paperless-field-extractor/config.toml` or via environment variables. Environment variables can be used to overwrite values from the configuration file.
 
-Apart from configuration an API Token is required to enable communication with the paperless API! This token should be made availible via the `PAPERLESS_API_CLIENT_API_TOKEN` environment variable!!!
+Apart from configuration an API Token is required to enable communication with the paperless API! This token should be made available via the `PAPERLESS_API_CLIENT_API_TOKEN` environment variable!!!
 
 This file shows the default configuration and explains the options:
 ``` toml
@@ -113,7 +113,7 @@ The default container is setup to include a model already and with some environm
     ghcr.io/ju6ge/paperless-llm-workflows:<version>-<backend> server
 ```
 
-Currently only the `vulkan` backend has a prebuilt container availible, it should be fine for most deployments even without a graphics processor availible.
+Currently only the `vulkan` backend has a prebuilt container available, it should be fine for most deployments even without a graphics processor available.
 
 
 ## Building the Container yourself
