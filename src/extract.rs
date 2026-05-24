@@ -308,6 +308,8 @@ impl LLModelExtractor {
 
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(NonZeroU32::new(ctx_size).unwrap()))
+            .with_type_k(llama_cpp_2::context::params::KvCacheType::F16)
+            .with_type_v(llama_cpp_2::context::params::KvCacheType::F16)
             .with_n_batch(ctx_size);
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
