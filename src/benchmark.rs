@@ -254,7 +254,7 @@ fn filename_to_result_name(path: &Path) -> String {
     result_name.trim_matches('-').to_string()
 }
 
-  fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
+fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
     let valid_doc_state = ctx.doc.clone();
     let mut test_doc_state = ctx.doc.clone();
     test_doc_state.custom_fields = None;
@@ -275,7 +275,8 @@ fn filename_to_result_name(path: &Path) -> String {
         {
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
-let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+                let (stats_tx, stats_rx) =
+                    std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
                 let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
                 let model_name = ctx.model_name.to_string();
 
@@ -296,7 +297,10 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
                     }
                 });
 
-                match ctx.model.extract(&doc_data, &cf_grammar, false, Some(stats_tx)) {
+                match ctx
+                    .model
+                    .extract(&doc_data, &cf_grammar, false, Some(stats_tx))
+                {
                     Ok(extracted_value) => {
                         let _ = rx_handle.join();
                         let last_stats = last_stats.lock().unwrap().clone();
@@ -362,7 +366,7 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
     }
 }
 
- fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
+fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
     let crrspndts_suggest_schema =
         crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
@@ -394,7 +398,10 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
             }
         });
 
-        match ctx.model.extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx)) {
+        match ctx
+            .model
+            .extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx))
+        {
             Ok(model_result_value) => {
                 let _ = rx_handle.join();
                 let last_stats = last_stats.lock().unwrap().clone();
@@ -476,7 +483,7 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
 /// on the document metadata programmatically may be used. This means only data that
 /// is availible for every document, because otherwise this benchmark might become
 /// very depenendent on the paperless instances configuration
- fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
+fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     if let Some(expected_correspondent) = ctx
@@ -490,7 +497,7 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-       let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
         let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
         let model_name = ctx.model_name.to_string();
 
@@ -511,7 +518,10 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
             }
         });
 
-        match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
+        match ctx
+            .model
+            .extract(&doc_data, &question_schema, false, Some(stats_tx))
+        {
             Ok(model_answer_value) => {
                 let _ = rx_handle.join();
                 let last_stats = last_stats.lock().unwrap().clone();
@@ -588,7 +598,10 @@ let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>
                 }
             });
 
-            match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
+            match ctx
+                .model
+                .extract(&doc_data, &question_schema, false, Some(stats_tx))
+            {
                 Ok(model_answer_value) => {
                     let _ = rx_handle.join();
                     let last_stats = last_stats.lock().unwrap().clone();
@@ -729,6 +742,7 @@ struct BenchmarkWorkerData {
     doc_to_process: Vec<Document>,
     custom_fields: Vec<CustomField>,
     crrspndents: Vec<Correspondent>,
+    gpu_pin: Option<usize>,
 }
 
 /// Helper method to manage benchmark subprocess and handle progress updates
@@ -741,6 +755,7 @@ async fn start_benchmark_subprocess(
     progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
     shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     result_path: Option<PathBuf>,
+    gpu_pin: Option<usize>,
 ) -> Result<(), String> {
     let ownbinary = env::current_exe()
         .expect("failed to get current executable path")
@@ -760,6 +775,7 @@ async fn start_benchmark_subprocess(
         doc_to_process,
         custom_fields,
         crrspndents,
+        gpu_pin,
     })
     .unwrap();
     let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
@@ -956,6 +972,8 @@ impl MultiBenchmarkParameters {
         let mut all_results = Vec::new();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.jobs));
 
+        let gpu_lock = Arc::new(RwLock::new(Vec::from_iter((0..self.jobs).map(|gpu_num| Some(gpu_num)))));
+
         for model_file in &model_files {
             let model_name = filename_to_result_name(model_file);
             let model_name2 = model_name.clone();
@@ -1025,10 +1043,20 @@ impl MultiBenchmarkParameters {
             let crrspndents_clone = crrspndents.clone();
             let shared_running_flag_clone = shared_running_flag.clone();
             let result_path_clone = result_path.clone();
+            let gpu_lock_clone = gpu_lock.clone();
+            let jobs = self.jobs;
 
             handles.spawn(async move {
                 loop {
                     if let Ok(_permit) = semaphore_clone.acquire().await {
+                        let mut gpu_pin: Option<usize> = None;
+                        for i in 0..jobs {
+                            let mut gpu_lock = gpu_lock_clone.write().await;
+                            if let Some(gpu_num_t) = gpu_lock.get_mut(i) {
+                                gpu_pin = gpu_num_t.take();                            
+                                break;
+                            }
+                        }
                         match start_benchmark_subprocess(
                             model_config,
                             docs_for_model,
@@ -1037,6 +1065,7 @@ impl MultiBenchmarkParameters {
                             tx_clone.clone(),
                             shared_running_flag_clone,
                             Some(result_path_clone),
+                            gpu_pin
                         )
                         .await
                         {
@@ -1054,14 +1083,18 @@ impl MultiBenchmarkParameters {
                                     .open(&error_path)
                                     .expect("Failed to create results file");
                                 let _ = writeln!(&mut file, "{err_msg}");
-                         let _ = tx_clone.send(ProgressUpdate::Error {
-                                     model_name: model_name.clone(),
-                                     error: err_msg,
-                                 });
+                                let _ = tx_clone.send(ProgressUpdate::Error {
+                                    model_name: model_name.clone(),
+                                    error: err_msg,
+                                });
                                 let _ = tx_clone.send(ProgressUpdate::Finished {
                                     model_name: model_name.clone(),
                                 });
                             }
+                        }
+                        if let Some(gpu_pin) = gpu_pin {
+                            let mut gpu_lock = gpu_lock_clone.write().await;
+                            gpu_lock[gpu_pin] = Some(gpu_pin);
                         }
                         break;
                     } else {
@@ -1109,6 +1142,7 @@ pub(crate) fn benchmark_worker() {
         Path::new(&benchmark_job_data.config.model),
         benchmark_job_data.config.num_gpu_layers,
         max_ctx,
+        benchmark_job_data.gpu_pin,
     )
     .expect("Language model is required to load for benchmarking its performance");
 
@@ -1266,6 +1300,7 @@ impl BenchmarkParameters {
             progress_sender.unwrap(),
             shared_running_flag,
             None,
+            None
         )
         .await;
     }

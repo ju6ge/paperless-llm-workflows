@@ -53,7 +53,7 @@ fn main() {
     let num_gpu_layers: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(999);
 
     println!("Loading model from: {}", model_path);
-    let mut extractor = LLModelExtractor::new(Path::new(model_path), num_gpu_layers, Some(4096))
+    let mut extractor = LLModelExtractor::new(Path::new(model_path), num_gpu_layers, Some(4096), None)
         .expect("Failed to load model");
 
     let enum_values = vec![

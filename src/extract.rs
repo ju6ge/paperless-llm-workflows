@@ -295,10 +295,14 @@ impl LLModelExtractor {
         model_path: &Path,
         num_gpu_layers: usize,
         ctx_size_max: Option<u32>,
+        gpu_pin: Option<usize>,
     ) -> Result<Self, ModelError> {
         let mut backend = LlamaBackend::init()?;
         backend.void_logs();
-        let params = LlamaModelParams::default().with_n_gpu_layers(num_gpu_layers as u32);
+        let mut params = LlamaModelParams::default().with_n_gpu_layers(num_gpu_layers as u32);
+        if let Some(gpu_pin) = gpu_pin {
+            params = params.with_devices(&[gpu_pin]).unwrap();
+        }
         let model = LlamaModel::load_from_file(&backend, model_path, &params)
             .expect("unable to load model");
 

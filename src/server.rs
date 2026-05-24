@@ -784,6 +784,7 @@ async fn document_processor(
                             Path::new(&model_path),
                             config.num_gpu_layers,
                             max_ctx,
+                            None,
                         )
                     })
                     .await
