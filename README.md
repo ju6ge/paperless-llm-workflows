@@ -89,7 +89,7 @@ error_tag_enable = false
 error_tag = "⚠️ error"
 # corresponding env var `ERROR_TAG_COLOR`, display color of the tag that is shown when a document processing ran into an error
 error_color = "#e45858"
-# corresponding env var `PAPERLESS_USER`, default user to use when creating processing and finshed tags on inital connection
+# corresponding env var `PAPERLESS_USER`, default user to use when creating processing and finshed tags on initial connection
 tag_user_name = "user"
 ```
 
