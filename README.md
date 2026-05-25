@@ -9,7 +9,7 @@ This project is for people who want to expand the machine learning capabilities 
 goal is to integrate language model capabilities into paperless seamlessly without yet another chat and prompting interface or 
 complex user interface. This is a standalone project and does not require an extra service to provide model inference everything is baked in already.
 
-If you are looking for document chat or don't care and are fine sending all your private documents to the big cloud providers checkout these projects:
+If you are looking for document chat or don't care and are fine sending all your private documents to the big cloud providers check out these projects:
 - [paperless-gpt](https://github.com/icereed/paperless-gpt)
 - [paperless-ai](https://github.com/clusterzx/paperless-ai)
 
@@ -20,11 +20,11 @@ with `cuda`, `vulkan`, `rocm` or `openmp` acceleration.
 As a base model this software is using a quantized version of `Qwen3 4B` to reduce the resource requirements and enable running this even with limited resources.
 If you are interested in how I selected this model, you can read my [blog post](https://www.felixrichter.tech/posts/llm-benchmarking/) about the process ;).
 
-Long term I want expand the features to enable fine tuning models to your document corpus. This is where the actual learning would come in.
+Long term I want to expand the features to enable fine-tuning models to your document corpus. This is where the actual learning would come in.
 
 # Usage
 
-This project spawns an API server that can be integrated to provide custom processing steps via `paperless` Workflow feature.
+This project spawns an API server that integrates into `paperless` workflow features using webhook and provides custom processing steps.
 
 ## LLM Workflows
 
@@ -32,19 +32,19 @@ After starting the service you can navigate to `http://{paperless-llm-workflows.
 
 If you wish to inspect the documentation online here is a [preview link](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-field-extractor/refs/heads/master/openapi.json).
 
-To integrate a functionality into paperless you need add it as webhook trigger in your paperless worflows:
+To integrate a functionality into paperless you need to add it as webhook trigger in your paperless workflows:
 
 ![Paperless Webhook](./example-workflow-action.png)
 
 When a webhook gets triggered the document will be added to the processing queue of `paperless-llm-workflows` with the corresponding action. The document will be given a 
 `processing` tag to make paperless users aware that the document still has pending updates. Once all processing requests for a document have been completed the document will 
-be updated with the results and is given a `finished` tag. If you wish to assign a specific tag on process completion there is an extra parameter too the webhook which you 
+be updated with the results and is given a `finished` tag. If you wish to assign a specific tag on process completion there is an extra parameter to the webhook which you 
 can use to overwrite what tag will be assigned once the processing step has completed. This process is shown in the following sequence diagram.
 
 ![LLM Workflow Sequence](./workflow_api_sequence.svg)
 
-As of now the following llm workflows are availible:
-- `/fill/custom_fields`: For all supported custom fields datatypes extract value from document content
+As of now the following llm workflows are available:
+- `/fill/custom_fields`: For all supported custom fields data types extract value from document content
 - `/suggest/correspondent`: Suggest document correspondent by using reasoning
 - `/decision`: Ask a true or false question about the document and set tags depending on result
 
@@ -53,7 +53,7 @@ As of now the following llm workflows are availible:
 
 Configuration of the software is possible via a configuration file at `/etc/paperless-field-extractor/config.toml` or via environment variables. Environment variables can be used to overwrite values from the configuration file.
 
-Apart from configuration an API Token is required to enable communication with the paperless API! This token should be made availible via the `PAPERLESS_API_CLIENT_API_TOKEN` environment variable!!!
+Apart from configuration an API Token is required to enable communication with the paperless API! This token should be made available via the `PAPERLESS_API_CLIENT_API_TOKEN` environment variable!!!
 
 This file shows the default configuration and explains the options:
 ``` toml
@@ -113,7 +113,7 @@ The default container is setup to include a model already and with some environm
     ghcr.io/ju6ge/paperless-llm-workflows:<version>-<backend> server
 ```
 
-Currently only the `vulkan` backend has a prebuilt container availible, it should be fine for most deployments even without a graphics processor availible.
+Currently, only the `vulkan` backend has a prebuilt container available, it should be fine for most deployments even without a graphics processor available.
 
 
 ## Building the Container yourself
@@ -134,7 +134,7 @@ You can also build the container locally if you prefer. For this the following c
 
 For development or advanced users manual compilation and setup may be desired.
 
-Successfull building requires selecting a compute backend via feature flag:
+Successfully building requires selecting a compute backend via feature flag:
 
 ``` sh
 cargo build --release -F <backend>
@@ -145,8 +145,6 @@ You can select from the following backends:
 - vulkan (CPU integrated GPU + dedicated GPU)
 - rocm (dedicated GPU - amd only + Ryzen AI Max Processors)
 - openmp (CPU)
-- cuda (GPU)
-- vulkan (CPU + GPU)
 
 Depending on your selection you will need to have the corresponding system libraries installed on your device, with development headers included.
 
