@@ -16,7 +16,7 @@ If you are looking for document chat or don't care and are fine sending all your
 ## Under the Hood
 
 Under the hood this software is running `llama.cpp` as an inference engine to provide a local language model without depending on any cloud providers. Depending on the selected feature it is possible to run
-with `cuda`, `vulkan` or `openmp` acceleration.
+with `cuda`, `vulkan`, `rocm` or `openmp` acceleration.
 As a base model this software is using a quantized version of `Qwen3 4B` to reduce the resource requirements and enable running this even with limited resources.
 If you are interested in how I selected this model, you can read my [blog post](https://www.felixrichter.tech/posts/llm-benchmarking/) about the process ;).
 
@@ -141,7 +141,9 @@ cargo build --release -F <backend>
 ```
 
 You can select from the following backends:
-- native (CPU)
+- cuda (dedicated GPU - nvidia only)
+- vulkan (CPU integrated GPU + dedicated GPU)
+- rocm (dedicated GPU - amd only + Ryzen AI Max Processors)
 - openmp (CPU)
 - cuda (GPU)
 - vulkan (CPU + GPU)
