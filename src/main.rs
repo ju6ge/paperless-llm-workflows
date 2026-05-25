@@ -22,15 +22,18 @@ use benchmark::{BenchmarkParameters, MultiBenchmarkParameters};
 #[cfg(any(
     all(feature = "vulkan", feature = "openmp"),
     all(feature = "vulkan", feature = "cuda"),
+    all(feature = "vulkan", feature = "rocm"),
     all(feature = "openmp", feature = "cuda"),
+    all(feature = "openmp", feature = "rocm"),
+    all(feature = "cuda", feature = "rocm"),
 ))]
 compile_error!(
-    "Only one compute backend can be used, choose feature `vulkan`, `openmp`, or `cuda`!"
+    "Only one compute backend can be used, choose feature `vulkan`, `openmp`, `cuda`, `rocm`!"
 );
 
-#[cfg(not(any(feature = "vulkan", feature = "openmp", feature = "cuda")))]
+#[cfg(not(any(feature = "vulkan", feature = "openmp", feature = "cuda", feature = "rocm")))]
 compile_error!(
-    "Choose feature `vulkan`, `openmp`, or `cuda` to select what compute backend should be used for inference!"
+    "Choose feature `vulkan`, `openmp`, `cuda` or `rocm` to select what compute backend should be used for inference!"
 );
 
 #[derive(Parser, Debug)]
