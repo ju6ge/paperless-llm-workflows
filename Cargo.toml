@@ -45,4 +45,5 @@ futures-timer = "3.0.3"
 vulkan = [ "llama-cpp-2/vulkan" ]
 openmp = [ "llama-cpp-2/openmp" ]
 cuda = [ "llama-cpp-2/cuda" ]
+rocm = [ "llama-cpp-2/rocm" ]
 benchmark = [ "crossterm", "ratatui" ]

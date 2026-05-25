@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - added error tag configuration to enable commuicated processing failues as tag state to paperless instance relevant issue #5 
 - support for longtext custom_field types
+- added feature flag to build with `rocm` compute backend
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
