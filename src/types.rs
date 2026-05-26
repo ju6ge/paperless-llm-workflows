@@ -85,7 +85,7 @@ impl FieldExtract {
                 let mut parsed_value: String = serde_json::from_value(self.value.clone())?;
                 // string custom fields in paperless may only be at most 128 chars
                 if parsed_value.len() > 128 {
-                    parsed_value.truncate(127);
+                    parsed_value = parsed_value.chars().take(127).collect();
                     parsed_value.push('…');
                 }
                 Ok(CustomFieldInstance {
