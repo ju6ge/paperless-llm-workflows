@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
-- trunkate string custom_field values to 128 chars
+- truncate string custom_field values to 128 chars
 - fix error tag enable flag config priority 
+- gracefully handle more types of llama cpp errors
 
 ## [0.3.4 - 2026-05-14]
 

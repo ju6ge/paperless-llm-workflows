@@ -1,6 +1,8 @@
+use llama_cpp_2::DecodeError;
 use llama_cpp_2::LlamaCppError;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::BatchAddError;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::AddBos;
 use llama_cpp_2::model::LlamaModel;
@@ -58,6 +60,10 @@ pub(crate) enum ModelError {
     ModelNotLoaded,
     #[error(transparent)]
     LlamaCppError(#[from] LlamaCppError),
+    #[error(transparent)]
+    LlamaDecodeError(#[from] DecodeError),
+    #[error(transparent)]
+    LlamaBatchAddError(#[from] BatchAddError),
 }
 
 pub(crate) struct LLModelExtractor {
@@ -137,16 +143,14 @@ impl LLModelExtractor {
             for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
                 // llama_decode will output logits only for the last token of the prompt
                 let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
-                batch
-                    .add(
-                        *token,
-                        (batch_i * batch_chunk_size + i) as i32,
-                        &[0],
-                        is_last,
-                    )
-                    .unwrap();
+                batch.add(
+                    *token,
+                    (batch_i * batch_chunk_size + i) as i32,
+                    &[0],
+                    is_last,
+                )?;
             }
-            ctx.decode(&mut batch).expect("llama_decode() failed");
+            ctx.decode(&mut batch)?;
         }
         batch.clear();
 
@@ -179,7 +183,7 @@ impl LLModelExtractor {
                 output.push_str(&output_string);
 
                 batch.clear();
-                batch.add(token, n_cur, &[0], true).unwrap();
+                batch.add(token, n_cur, &[0], true)?;
             }
 
             n_cur += 1;
