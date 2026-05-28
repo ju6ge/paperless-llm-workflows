@@ -142,7 +142,11 @@ async fn async_main() {
             processing_color: args.processing_color,
             finished_tag: args.finished_tag,
             finished_color: args.finished_color,
-            error_tag_enable: Some(args.enable_error_tag),
+            error_tag_enable: if args.enable_error_tag {
+                Some(true)
+            } else {
+                None
+            },
             error_tag: args.error_tag,
             error_color: args.error_color,
             tag_user_name: args.tag_user_name,
