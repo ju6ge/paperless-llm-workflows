@@ -26,14 +26,14 @@ pub struct FieldExtract {
     /// this field is used to guide the model to extract the desired data
     /// during grammar generation the string will be set to a constant value
     /// with the content being the name of the custom field that is to be extracted
-    description: String,
+    value_description: String,
     /// this field may hold extra information to guide the model towards the desired output
     /// it will be filled with extra information as a constant. For example it will hold
     /// all allowed variants when expecting a enum as schema for field_value or describe the
     /// format of a date output. When no extra constraints apply it will be ommitted from
     /// the grammar.
     #[serde(default)]
-    format: Option<Value>,
+    value_format: Option<Value>,
     /// since the custom field can hold any kind of data a generic json value is required to
     /// to hold it. During grammar generation the type of this value will be replaced with
     /// the type of the custom field
@@ -278,12 +278,12 @@ pub(crate) fn schema_from_correspondents(crrspd_list: &[Correspondent]) -> schem
 
     let mut base_schema = schema_for!(FieldExtract);
     if let Some(properties) = base_schema.get_mut("properties") {
-        if let Some(description_schema) = properties.get_mut("description") {
+        if let Some(description_schema) = properties.get_mut("value_description") {
             *description_schema = json_schema!({ "const": "Correspondent" })
                 .as_value()
                 .clone();
         }
-        if let Some(legend_schema) = properties.get_mut("format") {
+        if let Some(legend_schema) = properties.get_mut("value_format") {
             *legend_schema = json_schema!({
                 "type": "object",
                 "properties": {
@@ -324,7 +324,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     // of the custom field. This should guide the llm token generation to extract the
     // desired information from the document
     if let Some(properties) = base_schema.get_mut("properties")
-        && let Some(description_schema) = properties.get_mut("description")
+        && let Some(description_schema) = properties.get_mut("value_description")
     {
         *description_schema = json_schema!({ "const": cf.name }).as_value().clone();
     }
@@ -362,7 +362,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     };
     if let Some(guide_value) = guide_value_from_custom_field(cf) {
         base_schema.get_mut("properties").map(|properties| {
-            properties.get_mut("format").map(|legend_schema| {
+            properties.get_mut("value_format").map(|legend_schema| {
                 *legend_schema = json_schema!({
                     "type": "object",
                     "properties": {
@@ -381,7 +381,7 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
         if let Some(properties) = base_schema.get_mut("properties")
             && let Some(prop) = properties.as_object_mut()
         {
-            prop.remove("format");
+            prop.remove("value_format");
         }
     }
     // set the schema of the field value according to the type of custom field

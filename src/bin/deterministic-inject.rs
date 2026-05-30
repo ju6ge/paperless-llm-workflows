@@ -17,7 +17,7 @@ fn schema_with_enum(enum_values: &[&str]) -> schemars::Schema {
                 .as_value()
                 .clone();
         }
-        if let Some(format_schema) = properties.get_mut("format") {
+        if let Some(format_schema) = properties.get_mut("value_format") {
             *format_schema = json_schema!({
                 "type": "object",
                 "properties": {
