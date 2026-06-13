@@ -527,4 +527,112 @@ impl LLModelExtractor {
         //println!("{output}");
         Ok(serde_json::from_str(&output)?)
     }
+
+    /// Unconstrained free-text generation for benchmarking.
+    /// No grammar, no deterministic injection — pure sampling loop.
+    ///
+    /// Returns the generated text and per-phase `TokenGenerationStats`.
+    pub fn free_generate(
+        &mut self,
+        prompt: &str,
+        max_tokens: usize,
+        stats_tx: Option<std::sync::mpsc::SyncSender<TokenGenerationStats>>,
+    ) -> Result<(String, TokenGenerationStats), ModelError> {
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
+            LlamaSampler::min_p(0.01, 64),
+            LlamaSampler::temp(0.1),
+            LlamaSampler::dist(rand::random()),
+        ]);
+
+        let mut ctx = self
+            .model
+            .new_context(&self.backend, self.ctx_params.clone())
+            .expect("unable to create the llama_context");
+
+        let tokens_list = self
+            .model
+            .str_to_token(prompt, AddBos::Always)
+            .unwrap_or_else(|_| panic!("failed to tokenize prompt"));
+
+        let batch_chunk_size: usize = 512;
+        let mut batch = LlamaBatch::new(batch_chunk_size, 1);
+
+        let prompt_start = Instant::now();
+        let last_index = tokens_list.len() as i32 - 1;
+        for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
+            batch.clear();
+            for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
+                let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
+                batch.add(*token, (batch_i * batch_chunk_size + i) as i32, &[0], is_last)?;
+            }
+            ctx.decode(&mut batch)?;
+        }
+        batch.clear();
+        let prompt_elapsed_ms = prompt_start.elapsed().as_secs_f64() * 1_000.0;
+
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let mut n_cur = tokens_list.len() as i32;
+        let mut output = String::with_capacity(max_tokens * 4);
+        let mut forward_passes = 0u64;
+        let mut sampled_tokens = 0u64;
+        let mut sampled_elapsed_ms = 0.0f64;
+
+        let mut stats = TokenGenerationStats {
+            prompt_tokens: tokens_list.len(),
+            prompt_elapsed_ms,
+            injected_tokens: 0,
+            injected_elapsed_ms: 0.0,
+            sampled_tokens: 0,
+            sampled_elapsed_ms: 0.0,
+            forward_passes: 0,
+        };
+
+        let stats_last_send = Instant::now();
+
+        for _ in 0..max_tokens {
+            let sample_start = Instant::now();
+
+            if batch.n_tokens() > 0 {
+                forward_passes += 1;
+                ctx.decode(&mut batch).expect("failed to eval");
+                batch.clear();
+            }
+
+            let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+            sampled_tokens += 1;
+            sampled_elapsed_ms += sample_start.elapsed().as_secs_f64() * 1_000.0;
+
+            if token == self.model.token_eos() {
+                break;
+            }
+
+            let output_string = self
+                .model
+                .token_to_piece(token, &mut decoder, true, None)
+                .unwrap();
+            output.push_str(&output_string);
+
+            batch.add(token, n_cur, &[0], true)?;
+            n_cur += 1;
+
+            if let Some(ref tx) = stats_tx {
+                if stats_last_send.elapsed().as_millis() >= STATS_UPDATE_INTERVAL_MS {
+                    stats.sampled_tokens = sampled_tokens;
+                    stats.sampled_elapsed_ms = sampled_elapsed_ms;
+                    stats.forward_passes = forward_passes;
+                    let _ = tx.send(stats.clone());
+                }
+            }
+        }
+
+        if let Some(ref tx) = stats_tx {
+            stats.sampled_tokens = sampled_tokens;
+            stats.sampled_elapsed_ms = sampled_elapsed_ms;
+            stats.forward_passes = forward_passes;
+            let _ = tx.send(stats);
+        }
+
+        Ok((output, stats))
+    }
 }
