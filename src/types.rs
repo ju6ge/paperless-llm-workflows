@@ -360,6 +360,20 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
             return None;
         }
     };
+    if matches!(cf.data_type, DataTypeEnum::Select) {
+        if let Some(properties) = base_schema.get_mut("properties")
+            && let Some(prop) = properties.as_object_mut()
+        {
+            let key_name = "most_likely_value_reasoning_summarized";
+            prop.shift_insert(
+                2,
+                key_name.to_string(),
+                json_schema!({ "type": "string" }).to_value(),
+            );
+            prop.get_mut("required")
+                .map(|required| required.as_array_mut().map(|rv| rv.push(json!(key_name))));
+        }
+    }
     if let Some(guide_value) = guide_value_from_custom_field(cf) {
         base_schema.get_mut("properties").map(|properties| {
             properties.get_mut("value_format").map(|legend_schema| {
