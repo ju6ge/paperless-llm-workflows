@@ -95,7 +95,7 @@ def plot_histogram(
 
         # Add some text for labels, title and custom x-axis tick labels, etc.
         ax[i].set_ylabel(str(bentype).split(".")[1], fontsize="x-small")
-        ax[i].set_ylim(0, 600)
+        #ax[i].set_ylim(0, 600)
         ax[i].set_xticks(x + width, [""] * len(models))
 
     all_stats = {
@@ -114,7 +114,7 @@ def plot_histogram(
     # Add some text for labels, title and custom x-axis tick labels, etc.
     # ax.set_ylabel('Length (mm)')
     ax[i].set_ylabel("Overall", fontsize="small")
-    ax[i].set_ylim(0, 1500)
+    #ax[i].set_ylim(0, 1500)
     ax[i].set_xticks(x + width, models)
 
     # plt.tight_layout()
