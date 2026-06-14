@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - added api endpoint to for targeted custom field filling #17
 - added a way to automatically configure workflows for all supported custom fields, need to be enabled by user explicitly #20
+- updated token sampling and context management to be grammar aware and only let the model generate non deterministic parts of the output
 
 ## [ 0.4.0 - 2026-06-19]
 
