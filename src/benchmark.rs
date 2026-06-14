@@ -232,6 +232,7 @@ struct BenchmarkContext<'a> {
     custom_fields: &'a Vec<CustomField>,
     crrspndents: &'a Vec<Correspondent>,
     results: &'a mut BenchmarkResults,
+    model_name: &'a str,
 }
 
 fn filename_to_result_name(path: &Path) -> String {
@@ -253,7 +254,7 @@ fn filename_to_result_name(path: &Path) -> String {
     result_name.trim_matches('-').to_string()
 }
 
-  fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
+fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
     let valid_doc_state = ctx.doc.clone();
     let mut test_doc_state = ctx.doc.clone();
     test_doc_state.custom_fields = None;
@@ -274,17 +275,32 @@ fn filename_to_result_name(path: &Path) -> String {
         {
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
-                let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+                let (stats_tx, stats_rx) =
+                    std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
                 let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let model_name = ctx.model_name.to_string();
 
                 let rx_stats = last_stats.clone();
+                let model_name_live = model_name.clone();
                 let rx_handle = std::thread::spawn(move || {
                     for stats in stats_rx.iter() {
+                        let _ = writeln!(
+                            std::io::stdout(),
+                            "{}",
+                            serde_json::to_string(&ProgressUpdate::TokenStats {
+                                model_name: model_name_live.clone(),
+                                doc_token_stats: stats.clone(),
+                            })
+                            .unwrap()
+                        );
                         *rx_stats.lock().unwrap() = Some(stats);
                     }
                 });
 
-                match ctx.model.extract(&doc_data, &cf_grammar, false, Some(stats_tx)) {
+                match ctx
+                    .model
+                    .extract(&doc_data, &cf_grammar, false, Some(stats_tx))
+                {
                     Ok(extracted_value) => {
                         let _ = rx_handle.join();
                         let last_stats = last_stats.lock().unwrap().clone();
@@ -350,7 +366,7 @@ fn filename_to_result_name(path: &Path) -> String {
     }
 }
 
- fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
+fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
     let crrspndts_suggest_schema =
         crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
@@ -361,17 +377,31 @@ fn filename_to_result_name(path: &Path) -> String {
         .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
-        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
         let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let model_name = ctx.model_name.to_string();
 
         let rx_stats = last_stats.clone();
+        let model_name_live = model_name.clone();
         let rx_handle = std::thread::spawn(move || {
             for stats in stats_rx.iter() {
+                let _ = writeln!(
+                    std::io::stdout(),
+                    "{}",
+                    serde_json::to_string(&ProgressUpdate::TokenStats {
+                        model_name: model_name_live.clone(),
+                        doc_token_stats: stats.clone(),
+                    })
+                    .unwrap()
+                );
                 *rx_stats.lock().unwrap() = Some(stats);
             }
         });
 
-        match ctx.model.extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx)) {
+        match ctx
+            .model
+            .extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx))
+        {
             Ok(model_result_value) => {
                 let _ = rx_handle.join();
                 let last_stats = last_stats.lock().unwrap().clone();
@@ -453,7 +483,7 @@ fn filename_to_result_name(path: &Path) -> String {
 /// on the document metadata programmatically may be used. This means only data that
 /// is availible for every document, because otherwise this benchmark might become
 /// very depenendent on the paperless instances configuration
- fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
+fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     if let Some(expected_correspondent) = ctx
@@ -467,17 +497,31 @@ fn filename_to_result_name(path: &Path) -> String {
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
         let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let model_name = ctx.model_name.to_string();
 
         let rx_stats = last_stats.clone();
+        let model_name_live = model_name.clone();
         let rx_handle = std::thread::spawn(move || {
             for stats in stats_rx.iter() {
+                let _ = writeln!(
+                    std::io::stdout(),
+                    "{}",
+                    serde_json::to_string(&ProgressUpdate::TokenStats {
+                        model_name: model_name_live.clone(),
+                        doc_token_stats: stats.clone(),
+                    })
+                    .unwrap()
+                );
                 *rx_stats.lock().unwrap() = Some(stats);
             }
         });
 
-        match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
+        match ctx
+            .model
+            .extract(&doc_data, &question_schema, false, Some(stats_tx))
+        {
             Ok(model_answer_value) => {
                 let _ = rx_handle.join();
                 let last_stats = last_stats.lock().unwrap().clone();
@@ -533,17 +577,31 @@ fn filename_to_result_name(path: &Path) -> String {
                 random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
-            let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel(64);
+            let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
             let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let model_name = ctx.model_name.to_string();
 
             let rx_stats = last_stats.clone();
+            let model_name_live = model_name.clone();
             let rx_handle = std::thread::spawn(move || {
                 for stats in stats_rx.iter() {
+                    let _ = writeln!(
+                        std::io::stdout(),
+                        "{}",
+                        serde_json::to_string(&ProgressUpdate::TokenStats {
+                            model_name: model_name_live.clone(),
+                            doc_token_stats: stats.clone(),
+                        })
+                        .unwrap()
+                    );
                     *rx_stats.lock().unwrap() = Some(stats);
                 }
             });
 
-            match ctx.model.extract(&doc_data, &question_schema, false, Some(stats_tx)) {
+            match ctx
+                .model
+                .extract(&doc_data, &question_schema, false, Some(stats_tx))
+            {
                 Ok(model_answer_value) => {
                     let _ = rx_handle.join();
                     let last_stats = last_stats.lock().unwrap().clone();
@@ -609,6 +667,7 @@ fn run_benchmark_for_document(
         custom_fields,
         crrspndents,
         results,
+        model_name,
     };
 
     let results_before = ctx.results.results.len();
@@ -668,7 +727,7 @@ fn run_benchmark_for_document(
                 doc_id: doc.id,
                 progress: doc_index + 1,
                 total: total_docs,
-                cumulative_token_stats: cumulative_stats,
+                cumulative_token_stats: cumulative_stats.clone(),
             })
             .unwrap()
         );
@@ -1008,10 +1067,10 @@ impl MultiBenchmarkParameters {
                                     .open(&error_path)
                                     .expect("Failed to create results file");
                                 let _ = writeln!(&mut file, "{err_msg}");
-                         let _ = tx_clone.send(ProgressUpdate::Error {
-                                     model_name: model_name.clone(),
-                                     error: err_msg,
-                                 });
+                                let _ = tx_clone.send(ProgressUpdate::Error {
+                                    model_name: model_name.clone(),
+                                    error: err_msg,
+                                });
                                 let _ = tx_clone.send(ProgressUpdate::Finished {
                                     model_name: model_name.clone(),
                                 });
