@@ -742,6 +742,7 @@ struct BenchmarkWorkerData {
     doc_to_process: Vec<Document>,
     custom_fields: Vec<CustomField>,
     crrspndents: Vec<Correspondent>,
+    last_results: Option<BenchmarkResults>
 }
 
 /// Helper method to manage benchmark subprocess and handle progress updates
@@ -754,6 +755,7 @@ async fn start_benchmark_subprocess(
     progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
     shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     result_path: Option<PathBuf>,
+    last_results: Option<BenchmarkResults>,
 ) -> Result<(), String> {
     let ownbinary = env::current_exe()
         .expect("failed to get current executable path")
@@ -773,6 +775,7 @@ async fn start_benchmark_subprocess(
         doc_to_process,
         custom_fields,
         crrspndents,
+        last_results,
     })
     .unwrap();
     let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
@@ -991,20 +994,77 @@ impl MultiBenchmarkParameters {
                 total_docs: docs_for_model.len(),
             });
 
-            if self.continue_last {
+            let last_results = if self.continue_last {
                 if let Ok(result_file) = OpenOptions::new().read(true).open(&result_path) {
-                    let result_data: BenchmarkResults =
+                    let mut result_data: BenchmarkResults =
                         serde_json::from_reader(&result_file).unwrap();
+                    // remove document that where not fully processed from result_data
+                    // this might result in some duplicate work of the model, but it seems easier
+                    // that rewriting the entire processing logic to detect exactly which test
+                    // cases have not been run
+                    let unfinished_document_results = result_data
+                        .results
+                        .iter()
+                        .into_group_map_by(|sr| sr.doc_id)
+                        .iter()
+                        // map of single results for each document id
+                        .map(|x| {
+                            (x.0, x.1.len()) // count results per document
+                        })
+                        .filter_map(|x| {
+                            // compare with expected amount of results for each document
+                            let expected_result_count = docs_for_model
+                                .iter()
+                                .find(|d| d.id == *x.0)
+                                .and_then(|d| {
+                                    // count amount of custom fields that support learning
+                                    d.clone().custom_fields.and_then(|cfs| {
+                                        Some(
+                                            cfs.iter()
+                                                .filter_map(|cfi| {
+                                                    custom_fields
+                                                        .iter()
+                                                        .find(|cf| cf.id == cfi.field)
+                                                        .filter(|cf| {
+                                                            custom_field_learning_supported(cf)
+                                                        })
+                                                })
+                                                .count(),
+                                        )
+                                    })
+                                })
+                                .unwrap_or(0)
+                                + 3;
+                            if x.1 < expected_result_count {
+                                Some(*x.0)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    // update result list to only contain fully finished processed document
+                    result_data.results = result_data
+                        .results
+                        .into_iter()
+                        .filter_map(|sr| {
+                            if !unfinished_document_results.contains(&sr.doc_id) {
+                                Some(sr)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    // figure out which document have not been processed yet for this model
                     docs_for_model = docs_for_model
                         .into_iter()
                         .filter(|doc| {
-                            !longest_result.as_ref().is_some_and(|lr| {
-                                lr.results
-                                    .iter()
-                                    .map(|sr| sr.doc_id)
-                                    .dedup()
-                                    .contains(&doc.id)
-                            })
+                            !result_data
+                                .results
+                                .iter()
+                                .map(|pd| pd.doc_id)
+                                .contains(&doc.id)
                         })
                         .collect();
                     let _ = tx_clone.send(ProgressUpdate::DocumentProgress {
@@ -1021,7 +1081,7 @@ impl MultiBenchmarkParameters {
                     });
                     let _ = tx_clone.send(ProgressUpdate::BenchmarkResults {
                         model_name: model_name.clone(),
-                        results: result_data,
+                        results: result_data.clone()
                     });
                     if docs_for_model.is_empty() {
                         let _ = tx_clone.send(ProgressUpdate::Finished {
@@ -1029,8 +1089,13 @@ impl MultiBenchmarkParameters {
                         });
                         continue;
                     }
+                    Some(result_data)
+                } else {
+                    None
                 }
-            }
+            } else {
+                None
+            };
 
             // Start benchmark worker with semaphore
             let semaphore_clone = semaphore.clone();
@@ -1050,6 +1115,7 @@ impl MultiBenchmarkParameters {
                             tx_clone.clone(),
                             shared_running_flag_clone,
                             Some(result_path_clone),
+                            last_results
                         )
                         .await
                         {
@@ -1117,7 +1183,13 @@ pub(crate) fn benchmark_worker() {
         Some(benchmark_job_data.config.max_ctx as u32)
     };
 
-    let mut benchmark_results = BenchmarkResults::init_empty(&benchmark_job_data.config.model);
+    let mut benchmark_results = if let Some(last_results) = benchmark_job_data.last_results {
+        last_results
+    } else {
+        BenchmarkResults::init_empty(&benchmark_job_data.config.model)
+    };
+
+    let previously_finished_docs = benchmark_results.results.iter().map(|sr| sr.doc_id).dedup().count();
     let mut model = LLModelExtractor::new(
         Path::new(&benchmark_job_data.config.model),
         benchmark_job_data.config.num_gpu_layers,
@@ -1147,8 +1219,8 @@ pub(crate) fn benchmark_worker() {
             &benchmark_job_data.crrspndents,
             &mut benchmark_results,
             true,
-            i,
-            benchmark_job_data.doc_to_process.len(),
+            i + previously_finished_docs,
+            benchmark_job_data.doc_to_process.len() + previously_finished_docs,
         );
         overall_stats.add(&doc_stats);
     }
@@ -1278,6 +1350,7 @@ impl BenchmarkParameters {
             crrspndents,
             progress_sender.unwrap(),
             shared_running_flag,
+            None,
             None,
         )
         .await;
