@@ -97,6 +97,8 @@ pub(crate) struct SingleResult {
     doc_id: i64,
     expected_result: Value,
     benchmark_result: Value,
+    #[serde(default)]
+    raw_output: Value,
     success: bool,
     error: Option<String>,
     token_stats: Option<TokenGenerationStats>,
@@ -305,7 +307,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                         let _ = rx_handle.join();
                         let last_stats = last_stats.lock().unwrap().clone();
 
-                        let field_extract: FieldExtract = serde_json::from_value(extracted_value)
+                        let field_extract: FieldExtract = serde_json::from_value(extracted_value.clone())
                             .expect("grammar forced output to match type");
                         match field_extract.to_custom_field_instance(&doc_cf.0) {
                             Ok(extracted_cfi) => {
@@ -316,6 +318,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
+                                        raw_output: extracted_value,
                                         success: true,
                                         error: None,
                                         token_stats: last_stats,
@@ -327,6 +330,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
+                                        raw_output: extracted_value,
                                         success: false,
                                         error: None,
                                         token_stats: last_stats,
@@ -339,6 +343,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                     doc_id: ctx.doc.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
+                                    raw_output: extracted_value,
                                     success: false,
                                     error: Some(err.to_string()),
                                     token_stats: last_stats,
@@ -355,6 +360,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                             doc_id: ctx.doc.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                             benchmark_result: Value::Null,
+                            raw_output: Value::Null,
                             success: false,
                             error: Some(model_err.to_string()),
                             token_stats: last_stats,
@@ -406,7 +412,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                 let _ = rx_handle.join();
                 let last_stats = last_stats.lock().unwrap().clone();
 
-                let field_extract: FieldExtract = serde_json::from_value(model_result_value)
+                let field_extract: FieldExtract = serde_json::from_value(model_result_value.clone())
                     .expect("grammar enforces output matches type");
                 match field_extract.to_correspondent(&ctx.crrspndents.as_slice()) {
                     Ok(suggested_crrspndnt) => {
@@ -420,6 +426,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                 .unwrap(),
                                 benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
                                     .unwrap(),
+                                raw_output: model_result_value,
                                 success: true,
                                 error: None,
                                 token_stats: last_stats,
@@ -434,6 +441,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                 .unwrap(),
                                 benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
                                     .unwrap(),
+                                raw_output: model_result_value,
                                 success: false,
                                 error: None,
                                 token_stats: last_stats,
@@ -449,6 +457,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                             )
                             .unwrap(),
                             benchmark_result: serde_json::to_value(&field_extract).unwrap(),
+                            raw_output: model_result_value,
                             success: false,
                             error: Some(err.to_string()),
                             token_stats: last_stats,
@@ -466,6 +475,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                     expected_result: serde_json::to_value(expected_correspondent.name.clone())
                         .unwrap(),
                     benchmark_result: Value::Null,
+                    raw_output: Value::Null,
                     success: false,
                     error: Some(model_error.to_string()),
                     token_stats: last_stats,
@@ -534,6 +544,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: true,
                         error: None,
                         token_stats: last_stats,
@@ -544,6 +555,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: false,
                         error: None,
                         token_stats: last_stats,
@@ -559,6 +571,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                     doc_id: ctx.doc.id,
                     expected_result: Value::Bool(true),
                     benchmark_result: Value::Null,
+                    raw_output: Value::Null, // hame as benchmark_result
                     success: false,
                     error: Some(model_err.to_string()),
                     token_stats: last_stats,
@@ -615,6 +628,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
+                            raw_output: Value::Null, // hame as benchmark_result
                             success: true,
                             error: None,
                             token_stats: last_stats,
@@ -625,6 +639,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
+                            raw_output: Value::Null, // hame as benchmark_result
                             success: false,
                             error: None,
                             token_stats: last_stats,
@@ -640,6 +655,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(false),
                         benchmark_result: Value::Null,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: false,
                         error: Some(model_err.to_string()),
                         token_stats: last_stats,
