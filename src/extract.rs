@@ -11,6 +11,7 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::token::data::LlamaTokenData;
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
+use llama_cpp_2::token::logit_bias::LlamaLogitBias;
 use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -356,8 +357,34 @@ impl LLModelExtractor {
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
 
+        let json_str_term_tokens = (0..self.model.n_vocab())
+            .filter_map(|t| {
+                let mut decoder = encoding_rs::UTF_8.new_decoder();
+                if let Ok(s) = self
+                    .model
+                    .token_to_piece(LlamaToken(t), &mut decoder, true, None)
+                {
+                    if s.trim().ends_with("\"") && !s.contains("\\") {
+                        Some(LlamaToken(t))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let json_term_token_biases = json_str_term_tokens
+            .iter()
+            .map(|t| {
+                LlamaLogitBias::new(*t, 1.5) 
+            })
+            .collect::<Vec<_>>();
+
         let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
         let gpu_filter_sampler = LlamaSampler::chain_simple([
+            LlamaSampler::logit_bias(self.model.n_vocab(), &json_term_token_biases),
             LlamaSampler::min_p(0.01, 64),
         ]);
         let mut cpu_final_select = LlamaSampler::chain_simple([
