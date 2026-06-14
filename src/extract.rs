@@ -347,7 +347,14 @@ impl LLModelExtractor {
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
         let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
-        let mut sampler = LlamaSampler::chain_simple([
+        let mut fast_sampler = LlamaSampler::chain_simple([
+            //LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
+            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
+            LlamaSampler::min_p(0.01, 64),
+            LlamaSampler::temp(0.1),
+            LlamaSampler::dist(rand::random()),
+        ]);
+        let mut exact_sampler = LlamaSampler::chain_simple([
             LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
             LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
             LlamaSampler::min_p(0.01, 64),
@@ -417,7 +424,7 @@ impl LLModelExtractor {
                 &self.model,
             ) {
                 grammar_sampler.accept(injected);
-                sampler.accept(injected);
+                exact_sampler.accept(injected);
                 injected_tokens += 1;
                 injected_elapsed_ms += inject_start.elapsed().as_secs_f64() * 1_000.0;
 
@@ -471,8 +478,16 @@ impl LLModelExtractor {
 
                 // Sample a non-deterministic token
                 let sample_start = Instant::now();
-                let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-                grammar_sampler.accept(token);
+                let mut token = fast_sampler.sample(&ctx, batch.n_tokens() - 1);
+                let mut check_token = LlamaTokenDataArray::new(vec![LlamaTokenData::new(token, 0., 0.)], true);
+                grammar_sampler.apply(&mut check_token);
+                if !check_token.data[0].logit().is_infinite() {
+                    grammar_sampler.accept(token);
+                    exact_sampler.accept(token);
+                } else {
+                    token = exact_sampler.sample(&ctx, batch.n_tokens() -1);
+                    grammar_sampler.accept(token);
+                }
                 sampled_tokens += 1;
                 sampled_elapsed_ms += sample_start.elapsed().as_secs_f64() * 1_000.0;
 
