@@ -324,6 +324,7 @@ impl LLModelExtractor {
         let mut injected_tokens = 0u64;
         let mut sampled_tokens = 0u64;
 
+        let mut last_inject_substring: Option<String> = None;
         while n_cur as usize <= n_len {
             // Fast path: probe with first-char index (~50-500 tokens)
             if let Some(injected) = try_grammar_based_deterministic_inject(
@@ -348,17 +349,35 @@ impl LLModelExtractor {
                     let _ = std::io::stdout().flush();
                 }
                 output.push_str(&output_string);
-
-                batch.add(injected, n_cur, &[0], true)?;
-                n_cur += 1;
-                continue;
+                if let Some(last_inject_substring) = &mut last_inject_substring {
+                    last_inject_substring.push_str(&output_string);
+                } else {
+                    last_inject_substring = Some(output_string)
+                }
             } else {
-                // Decode batched deterministic tokens to advance context
-                if batch.n_tokens() > 0 {
-                    forward_passes += 1;
-                    ctx.decode(&mut batch).expect("failed to eval");
+                if let Some(last_inject_substring) = last_inject_substring.take() {
+                    let tokens_list = self
+                        .model
+                        .str_to_token(&last_inject_substring, AddBos::Never)
+                        .unwrap_or_else(|_| panic!("failed to tokenize injection"));
+                    let last_index = tokens_list.len() as i32 - 1;
+                    for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
+                        batch.clear();
+                        for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
+                            let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
+                            batch.add(
+                                *token,
+                                n_cur,
+                                &[0],
+                                is_last,
+                            )?;
+                            n_cur += 1;
+                        }
+                        ctx.decode(&mut batch)?;
+                    }
                     batch.clear();
                 }
+
                 // Check EOS from last decode
                 if output.ends_with(&self.eos_string) {
                     break;
@@ -372,6 +391,10 @@ impl LLModelExtractor {
                 if token == self.model.token_eos() {
                     break;
                 }
+                batch.add(token, n_cur, &[0], true)?;
+                n_cur += 1;
+                ctx.decode(&mut batch).expect("failed to eval");
+                batch.clear();
 
                 let output_string = self
                     .model
@@ -382,8 +405,6 @@ impl LLModelExtractor {
                     let _ = std::io::stdout().flush();
                 }
                 output.push_str(&output_string);
-                batch.add(token, n_cur, &[0], true)?;
-                n_cur += 1;
             }
         }
         log::debug!(
