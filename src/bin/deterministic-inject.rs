@@ -84,7 +84,7 @@ fn main() {
     println!("\nGenerating with grammar-constrained extraction...\n");
 
     let result = extractor
-        .extract(&doc_data, &schema, true)
+        .extract(&doc_data, &schema, true, None)
         .expect("Extraction failed");
 
     println!(

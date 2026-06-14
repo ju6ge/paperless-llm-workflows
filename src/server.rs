@@ -119,7 +119,7 @@ async fn handle_correspondend_suggest(
     let extracted_correspondent = spawn_blocking(move || {
         let mut model_singleton = MODEL_SINGLETON.blocking_lock();
         if let Some(model) = model_singleton.as_mut() {
-            model.extract(&doc_data, &crrspndts_suggest_schema, false)
+            model.extract(&doc_data, &crrspndts_suggest_schema, false, None)
         } else {
             Err(crate::extract::ModelError::ModelNotLoaded)
         }
@@ -186,7 +186,7 @@ async fn handle_custom_field_prediction(
             let extracted_cf = spawn_blocking(move || {
                 let mut model_singleton = MODEL_SINGLETON.blocking_lock();
                 if let Some(model) = model_singleton.as_mut() {
-                    model.extract(&doc_data, &field_grammar, false)
+                    model.extract(&doc_data, &field_grammar, false, None)
                 } else {
                     Err(crate::extract::ModelError::ModelNotLoaded)
                 }
@@ -235,7 +235,7 @@ async fn handle_title_suggestion(
     let extracted = spawn_blocking(move || {
         let mut model_singleton = MODEL_SINGLETON.blocking_lock();
         if let Some(model) = model_singleton.as_mut() {
-            model.extract(&doc_data, &title_schema, false)
+            model.extract(&doc_data, &title_schema, false, None)
         } else {
             Err(crate::extract::ModelError::ModelNotLoaded)
         }
@@ -288,7 +288,7 @@ async fn handle_decision(
     let extracted_answer = spawn_blocking(move || {
         let mut model_singleton = MODEL_SINGLETON.blocking_lock();
         if let Some(model) = model_singleton.as_mut() {
-            model.extract(&doc_data, &decision_schema, false)
+            model.extract(&doc_data, &decision_schema, false, None)
         } else {
             Err(crate::extract::ModelError::ModelNotLoaded)
         }
@@ -343,7 +343,7 @@ async fn handle_targeted_custom_field_prediction(
         let extracted_cf = spawn_blocking(move || {
             let mut model_singleton = MODEL_SINGLETON.blocking_lock();
             if let Some(model) = model_singleton.as_mut() {
-                model.extract(&doc_data, &field_grammar, false)
+                model.extract(&doc_data, &field_grammar, false, None)
             } else {
                 Err(crate::extract::ModelError::ModelNotLoaded)
             }
