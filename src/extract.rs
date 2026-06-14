@@ -10,8 +10,10 @@ use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::data::LlamaTokenData;
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
+use llama_cpp_2::token::LlamaToken;
 use schemars::Schema;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io::Write;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -63,6 +65,46 @@ fn collect_valid_tokens(data_array: &LlamaTokenDataArray) -> Vec<LlamaTokenData>
         .collect()
 }
 
+
+/// Maps each possible first Unicode code point to the list of vocabulary
+/// tokens that start with it.  Built once per model load.
+pub struct FirstCharIndex {
+    /// first Unicode char → tokens whose decoded piece starts with that char
+    map: HashMap<char, Vec<LlamaToken>>,
+    /// one representative token per first char, used for lightweight probing
+    representatives: Vec<LlamaToken>,
+}
+
+fn build_first_char_index(
+    model: &LlamaModel,
+    decoder: &mut encoding_rs::Decoder,
+) -> FirstCharIndex {
+    let vocab_size = model.n_vocab();
+    let mut map: HashMap<char, Vec<LlamaToken>> = HashMap::new();
+    let mut reps: Vec<LlamaToken> = Vec::new();
+    let mut seen_chars: std::collections::HashSet<char> = std::collections::HashSet::new();
+
+    for i in 0..vocab_size {
+        let tok = LlamaToken(i);
+        let piece = match model.token_to_piece(tok, decoder, true, None) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let first = piece.chars().next();
+        if let Some(c) = first {
+            if seen_chars.insert(c) {
+                reps.push(tok);
+            }
+            map.entry(c).or_default().push(tok);
+        }
+    }
+
+    FirstCharIndex {
+        map,
+        representatives: reps,
+    }
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum ModelError {
     #[error(transparent)]
@@ -82,6 +124,7 @@ pub(crate) struct LLModelExtractor {
     model: LlamaModel,
     ctx_params: LlamaContextParams,
     eos_string: String,
+    first_char_index: FirstCharIndex,
 }
 
 impl LLModelExtractor {
@@ -110,11 +153,14 @@ impl LLModelExtractor {
             .unwrap()
             .to_string();
 
+        let first_char_index = build_first_char_index(&model, &mut decoder);
+
         Ok(Self {
             backend,
             model,
             ctx_params,
             eos_string: eos_string.to_string(),
+            first_char_index,
         })
     }
 
