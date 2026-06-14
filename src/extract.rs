@@ -300,6 +300,8 @@ impl LLModelExtractor {
         // we use this object to submit token data for decoding
         let mut batch = LlamaBatch::new(batch_chunk_size, 1);
 
+        let mut forward_passes = 0u64;
+
         let last_index = tokens_list.len() as i32 - 1;
         for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
             batch.clear();
@@ -314,13 +316,13 @@ impl LLModelExtractor {
                 )?;
             }
             ctx.decode(&mut batch)?;
+            forward_passes += 1;
         }
         batch.clear();
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
         let mut output = String::new();
-        let mut forward_passes = 0u64;
         let mut injected_tokens = 0u64;
         let mut sampled_tokens = 0u64;
 
@@ -374,6 +376,7 @@ impl LLModelExtractor {
                             n_cur += 1;
                         }
                         ctx.decode(&mut batch)?;
+                        forward_passes += 1;
                     }
                     batch.clear();
                 }
@@ -394,6 +397,7 @@ impl LLModelExtractor {
                 batch.add(token, n_cur, &[0], true)?;
                 n_cur += 1;
                 ctx.decode(&mut batch).expect("failed to eval");
+                forward_passes += 1;
                 batch.clear();
 
                 let output_string = self
