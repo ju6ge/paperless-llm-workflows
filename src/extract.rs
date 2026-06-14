@@ -65,7 +65,6 @@ fn collect_valid_tokens(data_array: &LlamaTokenDataArray) -> Vec<LlamaTokenData>
         .collect()
 }
 
-
 /// Maps each possible first Unicode code point to the list of vocabulary
 /// tokens that start with it.  Built once per model load.
 pub struct FirstCharIndex {
@@ -103,6 +102,39 @@ fn build_first_char_index(
         map,
         representatives: reps,
     }
+}
+
+fn find_longest_prefix_token(
+    valid_tokens: &[LlamaTokenData],
+    model: &LlamaModel,
+    decoder: &mut encoding_rs::Decoder,
+) -> Option<llama_cpp_2::token::LlamaToken> {
+    let count = valid_tokens.len();
+    if count == 0 {
+        return None;
+    }
+    if count == 1 {
+        return Some(valid_tokens[0].id());
+    }
+    if count > 20 {
+        return None;
+    }
+    // Multiple valid tokens: check if they form a prefix chain
+    let mut token_pieces: Vec<(llama_cpp_2::token::LlamaToken, String)> = valid_tokens
+        .iter()
+        .filter_map(|td| {
+            let piece = model.token_to_piece(td.id(), decoder, true, None).ok()?;
+            Some((td.id(), piece.to_string()))
+        })
+        .collect();
+    token_pieces.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    let longest = token_pieces.first()?.0.clone();
+    let longest_str = &token_pieces.first()?.1;
+    let is_prefix_chain = token_pieces
+        .iter()
+        .skip(1)
+        .all(|(_, s)| longest_str.starts_with(s));
+    if is_prefix_chain { Some(longest) } else { None }
 }
 
 #[derive(Debug, Error)]
