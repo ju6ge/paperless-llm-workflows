@@ -391,7 +391,7 @@ impl LLModelExtractor {
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
-        let mut output = String::new();
+        let mut output = String::with_capacity(4096);
         let mut injected_tokens = 0u64;
         let mut injected_elapsed_ms = 0.0f64;
         let mut sampled_tokens = 0u64;
