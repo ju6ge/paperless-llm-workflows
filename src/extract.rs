@@ -20,6 +20,72 @@ use std::path::Path;
 use thiserror::Error;
 
 use gbnf::{self, GrammarItem, NonTerminalSymbol, ProductionItem, RepetitionType, TerminalSymbol};
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct TokenGenerationStats {
+    pub prompt_tokens: usize,
+    pub prompt_elapsed_ms: f64,
+    pub injected_tokens: u64,
+    pub injected_elapsed_ms: f64,
+    pub sampled_tokens: u64,
+    pub sampled_elapsed_ms: f64,
+    pub forward_passes: u64,
+}
+
+impl TokenGenerationStats {
+    pub fn new() -> Self {
+        Self {
+            prompt_tokens: 0,
+            prompt_elapsed_ms: 0.0,
+            injected_tokens: 0,
+            injected_elapsed_ms: 0.0,
+            sampled_tokens: 0,
+            sampled_elapsed_ms: 0.0,
+            forward_passes: 0,
+        }
+    }
+
+    pub fn add(&mut self, other: &Self) {
+        self.prompt_tokens += other.prompt_tokens;
+        self.prompt_elapsed_ms += other.prompt_elapsed_ms;
+        self.injected_tokens += other.injected_tokens;
+        self.injected_elapsed_ms += other.injected_elapsed_ms;
+        self.sampled_tokens += other.sampled_tokens;
+        self.sampled_elapsed_ms += other.sampled_elapsed_ms;
+        self.forward_passes += other.forward_passes;
+    }
+
+    pub fn prompt_tps(&self) -> f64 {
+        if self.prompt_elapsed_ms == 0.0 {
+            return 0.0;
+        }
+        self.prompt_tokens as f64 / (self.prompt_elapsed_ms / 1_000.0)
+    }
+
+    pub fn injected_tps(&self) -> f64 {
+        if self.injected_elapsed_ms == 0.0 {
+            return 0.0;
+        }
+        self.injected_tokens as f64 / (self.injected_elapsed_ms / 1_000.0)
+    }
+
+    pub fn sampled_tps(&self) -> f64 {
+        if self.sampled_elapsed_ms == 0.0 {
+            return 0.0;
+        }
+        self.sampled_tokens as f64 / (self.sampled_elapsed_ms / 1_000.0)
+    }
+
+    pub fn overall_tps(&self) -> f64 {
+        let total_ms = self.injected_elapsed_ms + self.sampled_elapsed_ms;
+        if total_ms == 0.0 {
+            return 0.0;
+        }
+        (self.injected_tokens + self.sampled_tokens) as f64 / (total_ms / 1_000.0)
+    }
+}
 
 fn gen_gbnf(schema: &schemars::Schema, eos_token: String) -> String {
     let js = &serde_json::to_string(schema.as_value()).unwrap();
