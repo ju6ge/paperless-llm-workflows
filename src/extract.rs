@@ -210,7 +210,7 @@ fn try_grammar_based_deterministic_inject(
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ModelError {
+pub enum ModelError {
     #[error(transparent)]
     FormatDeserializationError(#[from] serde_json::Error),
     #[error("Model has not been loaded!")]
@@ -223,7 +223,7 @@ pub(crate) enum ModelError {
     LlamaBatchAddError(#[from] BatchAddError),
 }
 
-pub(crate) struct LLModelExtractor {
+pub struct LLModelExtractor {
     backend: LlamaBackend,
     model: LlamaModel,
     ctx_params: LlamaContextParams,
