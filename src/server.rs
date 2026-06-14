@@ -1265,7 +1265,7 @@ pub(crate) struct PaperlessStatusTags {
     pub error: Option<Tag>,
 }
 
-pub async fn run_server(
+pub(crate) async fn run_server(
     config: Config,
     processing_tag: Tag,
     finished_tag: Tag,
