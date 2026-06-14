@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - support for longtext custom_field types
 - added feature flag to build with `rocm` compute backend
 - vastly improved token generation performance during grammar sampling with deterministic token injection logic
+- updated benchmarking to track token generation performance statistics
+- add script to evalute token generation stats and compare models
 
 ### Fixed
 - more robust fetching of custom_field types in case of newly added custom field types
 - truncate string custom_field values to 128 chars
 - fix error tag enable flag config priority 
 - gracefully handle more types of llama cpp errors
+- fixed bug that prevented benchmark continuation for unfished models
 
 ## [0.3.4 - 2026-05-14]
 
