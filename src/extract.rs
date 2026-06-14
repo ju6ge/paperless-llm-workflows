@@ -355,25 +355,26 @@ impl LLModelExtractor {
         stats_tx: Option<std::sync::mpsc::SyncSender<TokenGenerationStats>>,
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
+
         let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
-        let mut fast_sampler = LlamaSampler::chain_simple([
-            //LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
-            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
+        let gpu_filter_sampler = LlamaSampler::chain_simple([
             LlamaSampler::min_p(0.01, 64),
-            LlamaSampler::temp(0.1),
-            LlamaSampler::dist(rand::random()),
         ]);
-        let mut exact_sampler = LlamaSampler::chain_simple([
-            LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
-            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
-            LlamaSampler::min_p(0.01, 64),
-            LlamaSampler::temp(0.1),
+        let mut cpu_final_select = LlamaSampler::chain_simple([
+            LlamaSampler::dry(&self.model, 2.5, 1.75, 2, -1, ["\"", ":", "\n", "{", "}"]),
+            LlamaSampler::temp(0.075),
             LlamaSampler::dist(rand::random()),
+            //LlamaSampler::greedy(),
         ]);
+
         let prompt = format!("{}\n", serde_json::to_string(base_data).unwrap());
         let mut ctx = self
             .model
-            .new_context(&self.backend, self.ctx_params.clone())
+            .new_context_with_samplers(
+                &self.backend,
+                self.ctx_params.clone(),
+                [(0, gpu_filter_sampler)],
+            )
             .expect("unable to create the llama_context");
         let tokens_list = self
             .model
@@ -433,7 +434,6 @@ impl LLModelExtractor {
                 &self.model,
             ) {
                 grammar_sampler.accept(injected);
-                exact_sampler.accept(injected);
                 injected_tokens += 1;
                 injected_elapsed_ms += inject_start.elapsed().as_secs_f64() * 1_000.0;
 
@@ -456,6 +456,7 @@ impl LLModelExtractor {
                     last_inject_substring = Some(output_string)
                 }
             } else {
+                // Decode batched deterministic tokens to advance context
                 if let Some(last_inject_substring) = last_inject_substring.take() {
                     let tokens_list = self
                         .model
@@ -479,22 +480,27 @@ impl LLModelExtractor {
                     }
                     batch.clear();
                 }
-
                 // Check EOS from last decode
                 if output.ends_with(&self.eos_string) {
                     break;
                 }
-
                 // Sample a non-deterministic token
                 let sample_start = Instant::now();
-                let mut token = fast_sampler.sample(&ctx, batch.n_tokens() - 1);
-                let mut check_token = LlamaTokenDataArray::new(vec![LlamaTokenData::new(token, 0., 0.)], true);
+
+                // copy gpu generated logits before first sampling avoid possible double app of dry …
+                let mut token_data_array = ctx.token_data_array();
+
+                let mut token = cpu_final_select.sample(&mut ctx, -1);
+
+                let mut check_token =
+                    LlamaTokenDataArray::new(vec![LlamaTokenData::new(token, 0., 0.)], true);
                 grammar_sampler.apply(&mut check_token);
+
                 if !check_token.data[0].logit().is_infinite() {
                     grammar_sampler.accept(token);
-                    exact_sampler.accept(token);
                 } else {
-                    token = exact_sampler.sample(&ctx, batch.n_tokens() -1);
+                    grammar_sampler.apply(&mut token_data_array);
+                    token = token_data_array.sample_token_greedy();
                     grammar_sampler.accept(token);
                 }
                 sampled_tokens += 1;
