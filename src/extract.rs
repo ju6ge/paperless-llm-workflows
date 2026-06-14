@@ -317,9 +317,18 @@ impl LLModelExtractor {
             .map(|s| std::cmp::min(s, model.n_ctx_train()))
             .unwrap_or(model.n_ctx_train());
 
+        let threads = std::thread::available_parallelism()
+            .map(|p| p.get() as u32)
+            .unwrap_or(4);
+
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(NonZeroU32::new(ctx_size).unwrap()))
-            .with_n_batch(ctx_size);
+            .with_n_threads(threads as i32)
+            .with_n_threads_batch(threads as i32)
+            .with_type_k(llama_cpp_2::context::params::KvCacheType::F16)
+            .with_type_v(llama_cpp_2::context::params::KvCacheType::F16)
+            .with_n_batch(2048)
+            .with_n_ubatch(512);
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let eos_string = &model
