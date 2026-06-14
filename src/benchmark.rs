@@ -271,7 +271,7 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
 
-                match ctx.model.extract(&doc_data, &cf_grammar, false) {
+                match ctx.model.extract(&doc_data, &cf_grammar, false, None) {
                     Ok(extracted_value) => {
                         let field_extract: FieldExtract = serde_json::from_value(extracted_value)
                             .expect("grammar forced output to match type");
@@ -343,7 +343,7 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
     {
         match ctx
             .model
-            .extract(&doc_data, &crrspndts_suggest_schema, false)
+            .extract(&doc_data, &crrspndts_suggest_schema, false, None)
         {
             Ok(model_result_value) => {
                 let field_extract: FieldExtract = serde_json::from_value(model_result_value)
@@ -431,7 +431,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-        match ctx.model.extract(&doc_data, &question_schema, false) {
+        match ctx.model.extract(&doc_data, &question_schema, false, None) {
             Ok(model_answer_value) => {
                 let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
                     .expect("grammar constrains output to match type");
@@ -479,7 +479,7 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                 random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
-            match ctx.model.extract(&doc_data, &question_schema, false) {
+            match ctx.model.extract(&doc_data, &question_schema, false, None) {
                 Ok(model_answer_value) => {
                     let model_decision: Decision =
                         serde_json::from_value(model_answer_value.clone())

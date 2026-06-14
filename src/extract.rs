@@ -23,6 +23,9 @@ use gbnf::{self, GrammarItem, NonTerminalSymbol, ProductionItem, RepetitionType,
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+/// Minimum interval between cumulative stats updates sent via the channel.
+const STATS_UPDATE_INTERVAL_MS: u128 = 5_000;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TokenGenerationStats {
     pub prompt_tokens: usize,
@@ -340,6 +343,7 @@ impl LLModelExtractor {
         base_data: &Value,
         response_schema: &Schema,
         dry_run: bool,
+        stats_tx: Option<std::sync::mpsc::SyncSender<TokenGenerationStats>>,
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
         let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
@@ -362,17 +366,15 @@ impl LLModelExtractor {
         let n_len = tokens_list.len() + 4096;
 
         let batch_chunk_size: usize = 512;
-        // create a llama_batch with size 512
-        // we use this object to submit token data for decoding
         let mut batch = LlamaBatch::new(batch_chunk_size, 1);
 
         let mut forward_passes = 0u64;
+        let prompt_start = Instant::now();
 
         let last_index = tokens_list.len() as i32 - 1;
         for (batch_i, token_batch) in tokens_list.chunks(batch_chunk_size).enumerate() {
             batch.clear();
             for (i, token) in (0_usize..).zip(token_batch.into_iter()) {
-                // llama_decode will output logits only for the last token of the prompt
                 let is_last = (batch_i * batch_chunk_size + i) == last_index as usize;
                 batch.add(
                     *token,
@@ -385,16 +387,30 @@ impl LLModelExtractor {
             forward_passes += 1;
         }
         batch.clear();
+        let prompt_elapsed_ms = prompt_start.elapsed().as_secs_f64() * 1_000.0;
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
         let mut output = String::new();
         let mut injected_tokens = 0u64;
+        let mut injected_elapsed_ms = 0.0f64;
         let mut sampled_tokens = 0u64;
+        let mut sampled_elapsed_ms = 0.0f64;
+        let mut stats = TokenGenerationStats {
+            prompt_tokens: tokens_list.len(),
+            prompt_elapsed_ms,
+            injected_tokens: 0,
+            injected_elapsed_ms: 0.0,
+            sampled_tokens: 0,
+            sampled_elapsed_ms: 0.0,
+            forward_passes: 0,
+        };
 
         let mut last_inject_substring: Option<String> = None;
+        let mut stats_last_send = Instant::now();
         while n_cur as usize <= n_len {
             // Fast path: probe with first-char index (~50-500 tokens)
+            let inject_start = Instant::now();
             if let Some(injected) = try_grammar_based_deterministic_inject(
                 &grammar_sampler,
                 &self.first_char_index,
@@ -403,6 +419,7 @@ impl LLModelExtractor {
                 grammar_sampler.accept(injected);
                 sampler.accept(injected);
                 injected_tokens += 1;
+                injected_elapsed_ms += inject_start.elapsed().as_secs_f64() * 1_000.0;
 
                 if injected == self.model.token_eos() {
                     break;
@@ -453,9 +470,11 @@ impl LLModelExtractor {
                 }
 
                 // Sample a non-deterministic token
-                sampled_tokens += 1;
+                let sample_start = Instant::now();
                 let token = sampler.sample(&ctx, batch.n_tokens() - 1);
                 grammar_sampler.accept(token);
+                sampled_tokens += 1;
+                sampled_elapsed_ms += sample_start.elapsed().as_secs_f64() * 1_000.0;
 
                 if token == self.model.token_eos() {
                     break;
@@ -476,11 +495,33 @@ impl LLModelExtractor {
                 }
                 output.push_str(&output_string);
             }
+            if stats_tx.is_some()
+                && stats_last_send.elapsed().as_millis() >= STATS_UPDATE_INTERVAL_MS
+            {
+                stats.injected_tokens = injected_tokens;
+                stats.injected_elapsed_ms = injected_elapsed_ms;
+                stats.sampled_tokens = sampled_tokens;
+                stats.sampled_elapsed_ms = sampled_elapsed_ms;
+                stats.forward_passes = forward_passes;
+                let _ = stats_tx.as_ref().unwrap().send(stats.clone());
+                stats_last_send = Instant::now();
+            }
         }
         log::debug!(
             "extraction stats: forward_passes={} injected={} sampled={}",
             forward_passes, injected_tokens, sampled_tokens
         );
+
+        // Send cumulative stats update after each sampled token
+        if let Some(ref tx) = stats_tx {
+            stats.injected_tokens = injected_tokens;
+            stats.injected_elapsed_ms = injected_elapsed_ms;
+            stats.sampled_tokens = sampled_tokens;
+            stats.sampled_elapsed_ms = sampled_elapsed_ms;
+            stats.forward_passes = forward_passes;
+            let _ = tx.send(stats);
+        }
+
         // remove eos token
         let output = output.replace(&self.eos_string, "");
         //println!("{output}");
