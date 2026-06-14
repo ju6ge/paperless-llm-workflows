@@ -3,3 +3,4 @@ config.toml
 *.json
 benchmark_results/
 models/
+.env
