@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [ 0.4.0 - 2026-06-19]
+
 ### Added
 - added error tag configuration to enable commuicated processing failues as tag state to paperless instance relevant issue #5 
 - support for longtext custom_field types
