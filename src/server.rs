@@ -22,6 +22,7 @@ use paperless_api_client::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use tokio::{
     join, spawn,
@@ -56,7 +57,9 @@ use crate::{
 #[derive(Debug, PartialEq, Clone)]
 #[non_exhaustive]
 enum ProcessingType {
-    CustomFieldPrediction,
+    CustomFieldPrediction {
+        exclude_fields: Option<Vec<CustomField>>,
+    },
     CorrespondentSuggest,
     DecsionTagFlow {
         question: String,
@@ -133,12 +136,20 @@ async fn handle_correspondend_suggest(
 
 async fn handle_custom_field_prediction(
     doc: &mut Document,
+    ignore_custom_fields: &Option<Vec<CustomField>>,
     api_client: &mut Client,
 ) -> Result<(), DocumentProcessingError> {
     // fetch all custom field definitions for fields on the document that need to be filled
     let relevant_custom_fields: Vec<CustomField> =
     if let Some(cf_ids) = doc.custom_fields.as_ref().map(|cfis| {
             cfis.iter()
+                .filter(|cfi| {
+                    ignore_custom_fields
+                        .as_ref()
+                        .is_none_or(|ref ignored_fields| {
+                            ignored_fields.iter().find(|ignored_cf| ignored_cf.id == cfi.field).is_none()
+                        })
+                })
                 .filter(|cfi| cfi.value.is_none())
                 .map(|cfi| cfi.field)
                 .collect()
@@ -255,6 +266,10 @@ enum WebhookError {
     DocumentDoesNotExist(i64),
     #[error("Document ID is not a valid integer!")]
     InvalidDocumentId,
+    #[error(
+        "The provided list of custom fields is invalid, custom fields that should be ignored need to be referenced by their integer id or sting name!"
+    )]
+    InvalidIgnoreCustomFieldValue,
     #[error("Could not parse Document ID from `document_url` field!")]
     DocumentUrlParsingIDFailed,
     #[error("Document Url points to a server unrelated to this configuration. Ignoring Request")]
@@ -277,6 +292,18 @@ struct DecisionTagFlowRequest {
     true_tag: Option<String>,
     /// optional tag to assign if the answer is false
     false_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct FillAllCustomFields {
+    /// url of the document that should be processed
+    document_url: String,
+    /// list of custom fields that will be ignored
+    ///
+    /// must be either an integer referencing the custom field id, or string referencing the custom field name
+    ignore_custom_fields: Option<Vec<Value>>,
+    /// optional tag to assign if the answer is false
+    next_tag: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -515,19 +542,60 @@ async fn suggest_correspondent(
 /// - [ ] URL
 /// - [x] LargeText
 async fn custom_field_prediction(
-    params: web::Json<WebhookParams>,
+    params: web::Json<FillAllCustomFields>,
     status_tags: Data<PaperlessStatusTags>,
     api_client: Data<Client>,
     config: Data<Config>,
     document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
 ) -> Result<HttpResponse, WebhookError> {
-    params
+    let exclude_fields = if let Some(ignore_custom_fields) = &params.ignore_custom_fields {
+        let mut ignored_cf_ids = Vec::new();
+        let mut ignored_cf_names = Vec::new();
+
+        for ignored_field_value in ignore_custom_fields {
+            match ignored_field_value {
+                Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+                    return Err(WebhookError::InvalidIgnoreCustomFieldValue);
+                }
+                Value::Number(number) => {
+                    if number.is_i64() {
+                        ignored_cf_ids.push(number.as_i64().unwrap());
+                    } else if number.is_u64() {
+                        ignored_cf_ids.push(number.as_u64().unwrap() as i64);
+                    } else {
+                        return Err(WebhookError::InvalidIgnoreCustomFieldValue);
+                    }
+                }
+                Value::String(name) => {
+                    ignored_cf_names.push(name.clone());
+                }
+            }
+        }
+
+        let mut api_client_cloned =
+            Arc::<Client>::make_mut(&mut api_client.clone().into_inner()).clone();
+        Some(
+            requests::get_all_custom_fields(&mut api_client_cloned)
+                .await
+                .into_iter()
+                .filter(|cf| ignored_cf_ids.contains(&cf.id) || ignored_cf_names.contains(&cf.name))
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    let generic_webhook_params = WebhookParams {
+        document_url: params.document_url.clone(),
+        next_tag: params.next_tag.clone(),
+    };
+    generic_webhook_params
         .handle_request(
             status_tags,
             api_client,
             config,
             document_pipeline,
-            ProcessingType::CustomFieldPrediction,
+            ProcessingType::CustomFieldPrediction { exclude_fields },
         )
         .await?;
     Ok(HttpResponse::Accepted().into())
@@ -566,7 +634,7 @@ fn merge_document_status(
         return;
     }
     match processing_type {
-        ProcessingType::CustomFieldPrediction => {
+        ProcessingType::CustomFieldPrediction { exclude_fields: _ } => {
             if let Some(updated_custom_fields) = &updated_doc.custom_fields {
                 for updated_cf in updated_custom_fields {
                     if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
@@ -671,7 +739,7 @@ async fn document_updater(
                 .unique()
             {
                 match doc_processing_steps {
-                    ProcessingType::CustomFieldPrediction => {
+                    ProcessingType::CustomFieldPrediction { exclude_fields: _ } => {
                         if let Some(cfis) = doc_req.document.custom_fields.as_ref() {
                             updated_cf = Some(cfis.clone());
                         }
@@ -805,9 +873,13 @@ async fn document_processor(
             };
 
             let processing_result = match doc_process_req.processing_type {
-                ProcessingType::CustomFieldPrediction => {
-                    handle_custom_field_prediction(&mut doc_process_req.document, &mut api_client)
-                        .await
+                ProcessingType::CustomFieldPrediction { ref exclude_fields } => {
+                    handle_custom_field_prediction(
+                        &mut doc_process_req.document,
+                        exclude_fields,
+                        &mut api_client,
+                    )
+                    .await
                 }
                 ProcessingType::CorrespondentSuggest => {
                     handle_correspondend_suggest(&mut doc_process_req.document, &mut api_client)
