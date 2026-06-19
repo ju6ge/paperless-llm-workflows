@@ -1,9 +1,13 @@
 use chrono::NaiveDate;
+use once_cell::sync::Lazy;
 use paperless_api_client::types::{Correspondent, CustomField, CustomFieldInstance, DataTypeEnum};
+use regex::Regex;
 use schemars::{JsonSchema, json_schema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+
+static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}\}");
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 /// Structure to extract currency data from a document
@@ -405,4 +409,34 @@ pub(crate) fn schema_from_decision_question(question: &String) -> schemars::Sche
         })
     });
     base_schema
+}
+
+pub(crate) fn parse_title_template(template: &str) -> Vec<String> {
+    TEMPLATE_KEY_REGEX
+        .captures_iter(template)
+        .map(|cap| cap.get(1).unwrap().as_str().to_string())
+        .collect()
+}
+
+pub(crate) fn schema_from_title_template(template: Option<&str>) -> schemars::Schema {
+    let keys = match template {
+        Some(t) if !t.is_empty() => parse_title_template(t),
+        _ => vec!["title".to_string()],
+    };
+
+    let mut properties_map = serde_json::Map::new();
+    for key in &keys {
+        properties_map.insert(
+            key.clone(),
+            json!({"type": "string"}),
+        );
+    }
+
+    let schema_value: Value = json!({
+        "type": "object",
+        "properties": properties_map,
+        "required": keys
+    });
+
+    serde_json::from_value(schema_value).unwrap()
 }

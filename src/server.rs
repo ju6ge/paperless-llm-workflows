@@ -66,6 +66,9 @@ enum ProcessingType {
         true_tag: Option<Tag>,
         false_tag: Option<Tag>,
     },
+    TitleSuggest {
+        template: Option<String>,
+    },
 }
 
 impl Hash for ProcessingType {
@@ -215,6 +218,57 @@ async fn handle_custom_field_prediction(
     Ok(())
 }
 
+async fn handle_title_suggestion(
+    doc: &mut Document,
+    _api_client: &mut Client,
+    template: &Option<String>,
+) -> Result<(), DocumentProcessingError> {
+    let title_schema = crate::types::schema_from_title_template(template.as_deref());
+
+    let doc_data = serde_json::to_value(&doc.content).unwrap();
+
+    let extracted = spawn_blocking(move || {
+        let mut model_singleton = MODEL_SINGLETON.blocking_lock();
+        if let Some(model) = model_singleton.as_mut() {
+            model.extract(&doc_data, &title_schema, false)
+        } else {
+            Err(crate::extract::ModelError::ModelNotLoaded)
+        }
+    })
+    .await??;
+
+    log::debug!(
+        "Extracted title fields for document {}\n{extracted:#?}",
+        doc.id
+    );
+
+    let title = match template {
+        Some(t) if !t.is_empty() => {
+            let fields: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_value(extracted).map_err(FieldError::from)?;
+            let keys = crate::types::parse_title_template(t);
+            let mut result = t.clone();
+            for key in keys {
+                let val = fields.get(&key).and_then(|v| v.as_str()).unwrap_or("");
+                result = result.replace(&format!("{{{{{}}}}}", key), val);
+            }
+            result
+        }
+        _ => {
+            let fields: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_value(extracted).map_err(FieldError::from)?;
+            fields.get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+
+    doc.title = Some(title);
+
+    Ok(())
+}
+
 async fn handle_decision(
     doc: &mut Document,
     question: &String,
@@ -302,7 +356,17 @@ struct FillAllCustomFields {
     ///
     /// must be either an integer referencing the custom field id, or string referencing the custom field name
     ignore_custom_fields: Option<Vec<Value>>,
-    /// optional tag to assign if the answer is false
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
+    next_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct TitleSuggestParams {
+    /// url of the document that should be processed
+    document_url: String,
+    /// optional jinja-style template for title formatting, e.g. "{{correspondent}} - {{date}} - {{subject}}". If unspecified, a single free-form title is generated.
+    template: Option<String>,
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
     next_tag: Option<String>,
 }
 
@@ -601,10 +665,43 @@ async fn custom_field_prediction(
     Ok(HttpResponse::Accepted().into())
 }
 
+#[utoipa::path(tag = "llm_workflow_trigger", request_body = inline(TitleSuggestParams))]
+#[post("/suggest/title")]
+/// Workflow to suggest a document title
+///
+/// Given the document content, use the LLM to generate a title. Optionally a jinja-style template
+/// can be provided to control the title format, e.g. `{{correspondent}} - {{date}} - {{subject}}`.
+/// When a template is used, the LLM generates each field individually and the code composes the
+/// final title. Without a template, a single free-form title is generated.
+async fn suggest_title(
+    params: web::Json<TitleSuggestParams>,
+    status_tags: Data<PaperlessStatusTags>,
+    api_client: Data<Client>,
+    config: Data<Config>,
+    document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
+) -> Result<HttpResponse, WebhookError> {
+    let webhook_params = WebhookParams {
+        document_url: params.document_url.clone(),
+        next_tag: params.next_tag.clone(),
+    };
+    webhook_params
+        .handle_request(
+            status_tags,
+            api_client,
+            config,
+            document_pipeline,
+            ProcessingType::TitleSuggest {
+                template: params.template.clone(),
+            },
+        )
+        .await?;
+    Ok(HttpResponse::Accepted().into())
+}
+
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(suggest_correspondent, custom_field_prediction, decision),
-    components(schemas(WebhookParams))
+    paths(suggest_correspondent, custom_field_prediction, decision, suggest_title),
+    components(schemas(WebhookParams, TitleSuggestParams))
 )]
 pub(crate) struct DocumentProcessingApiSpec;
 
@@ -615,6 +712,7 @@ impl HttpServiceFactory for DocumentProcessingApi {
         custom_field_prediction.register(config);
         suggest_correspondent.register(config);
         decision.register(config);
+        suggest_title.register(config);
     }
 }
 
@@ -664,6 +762,9 @@ fn merge_document_status(
                     doc.tags.push(*updated_tag);
                 }
             }
+        }
+        ProcessingType::TitleSuggest { template: _ } => {
+            doc.title = updated_doc.title.clone();
         }
     }
 }
@@ -728,6 +829,7 @@ async fn document_updater(
 
             let mut updated_cf: Option<Vec<CustomFieldInstance>> = None;
             let mut updated_crrspdnt: Option<i64> = None;
+            let mut updated_title: Option<String> = None;
 
             for doc_processing_steps in [doc_req.processing_type]
                 .iter()
@@ -755,6 +857,13 @@ async fn document_updater(
                         // nothing needs to happen here, the updated tags are already part of the document
                         // since they are synced with the same document in the queue
                     }
+                    ProcessingType::TitleSuggest { template: _ } => {
+                        if let Some(ref t) = doc_req.document.title
+                            && !t.is_empty()
+                        {
+                            updated_title = Some(t.clone());
+                        }
+                    }
                 }
             }
 
@@ -767,6 +876,7 @@ async fn document_updater(
                 doc_req.document.id,
                 updated_doc_tags,
                 updated_crrspdnt,
+                updated_title,
                 updated_cf,
             )
             .await
@@ -789,6 +899,7 @@ async fn document_updater(
                     &mut api_client,
                     doc_req.document.id,
                     updated_tag_with_error,
+                    None,
                     None,
                     None,
                 )
@@ -895,6 +1006,14 @@ async fn document_processor(
                         question,
                         true_tag.as_ref(),
                         false_tag.as_ref(),
+                    )
+                    .await
+                }
+                ProcessingType::TitleSuggest { ref template } => {
+                    handle_title_suggestion(
+                        &mut doc_process_req.document,
+                        &mut api_client,
+                        template,
                     )
                     .await
                 }
