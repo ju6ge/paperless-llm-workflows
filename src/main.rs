@@ -284,7 +284,7 @@ async fn async_main() {
             })
             .ok()
         } else {
-            tags.iter().find(|t| t.name == config.finished_tag).cloned()
+            tags.iter().find(|t| t.name == config.error_tag).cloned()
         }
     } else {
         None
