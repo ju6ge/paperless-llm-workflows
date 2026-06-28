@@ -735,6 +735,49 @@ async fn custom_field_prediction(
     Ok(HttpResponse::Accepted().into())
 }
 
+#[utoipa::path(tag = "llm_workflow_trigger")]
+#[post("/fill/target_custom_field")]
+/// Workflow to fill a specific unfilled custom fields on a document
+///
+/// ## Supported Custom Field Types
+///
+/// Currently this projects predicting the following kinds of custom fields:
+/// - [x] Boolean
+/// - [x] Date
+/// - [x] Integer
+/// - [x] Number
+/// - [x] Monetary
+/// - [x] Text
+/// - [x] Select
+/// - [ ] Document Link
+/// - [ ] URL
+/// - [x] LargeText
+async fn targeted_custom_field_prediction(
+    params: web::Json<TargetedCustomFieldFill>,
+    status_tags: Data<PaperlessStatusTags>,
+    api_client: Data<Client>,
+    config: Data<Config>,
+    document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
+) -> Result<HttpResponse, WebhookError> {
+    let generic_webhook_params = WebhookParams {
+        document_url: params.document_url.clone(),
+        next_tag: params.next_tag.clone(),
+    };
+    generic_webhook_params
+        .handle_request(
+            status_tags,
+            api_client,
+            config,
+            document_pipeline,
+            ProcessingType::TargetedCustomField {
+                custom_field_id: params.custom_field_id,
+                prompt: params.prompt.clone(),
+            },
+        )
+        .await?;
+    Ok(HttpResponse::Accepted().into())
+}
+
 #[utoipa::path(tag = "llm_workflow_trigger", request_body = inline(TitleSuggestParams))]
 #[post("/suggest/title")]
 /// Workflow to suggest a document title
@@ -770,7 +813,13 @@ async fn suggest_title(
 
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(suggest_correspondent, custom_field_prediction, decision, suggest_title),
+    paths(
+        suggest_correspondent,
+        custom_field_prediction,
+        decision,
+        suggest_title,
+        targeted_custom_field_prediction
+    ),
     components(schemas(WebhookParams, TitleSuggestParams))
 )]
 pub(crate) struct DocumentProcessingApiSpec;
@@ -1120,8 +1169,18 @@ async fn document_processor(
                 }
                 ProcessingType::TargetedCustomField {
                     custom_field_id,
-                    prompt,
-                } => unimplemented!(),
+                    ref prompt,
+                } => match api_client.custom_fields().retrieve(custom_field_id).await {
+                    Ok(cf) => {
+                        handle_targeted_custom_field_prediction(
+                            &mut doc_process_req.document,
+                            cf,
+                            prompt.clone(),
+                        )
+                        .await
+                    }
+                    Err(err) => Err(DocumentProcessingError::from(err)),
+                },
             };
 
             let mut doc_in_queue_again = false;
