@@ -315,6 +315,28 @@ async fn async_main() {
         )
         .await;
 
+        // if error tag was enabled later, update workflow triggers to account for it
+        if let Some(error_tag) = &error_tag {
+            for wf_trigger in all_generated_workflows
+                .iter()
+                .map(|(w, _c)| w.triggers.clone())
+                .flatten()
+            {
+                if wf_trigger
+                    .filter_has_not_tags
+                    .as_ref()
+                    .is_some_and(|igonred_tag_ids| !igonred_tag_ids.contains(&error_tag.id))
+                {
+                    requests::update_workflow_trigger_ignore_tags(
+                        &mut api_client,
+                        &wf_trigger,
+                        &[&processing_tag, error_tag],
+                    )
+                    .await;
+                }
+            }
+        }
+
         // generate workflows for all custom fields that are supported but don't have a dedicated workflow yet
         let custom_fields_without_workflow = all_supported_custom_fields
             .iter()
