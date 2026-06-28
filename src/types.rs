@@ -389,6 +389,33 @@ pub(crate) fn schema_from_custom_field(cf: &CustomField) -> Option<schemars::Sch
     Some(base_schema)
 }
 
+pub(crate) fn schema_from_custom_field_with_prompt(
+    cf: &CustomField,
+    prompt: String,
+) -> Option<schemars::Schema> {
+    let mut schema = schema_from_custom_field(cf)?;
+
+    let key_name = "instructions";
+    if let Some(properties) = schema.get_mut("properties") {
+        if let Some(prop) = properties.as_object_mut() {
+            prop.shift_insert(
+                2,
+                key_name.to_string(),
+                json_schema!({ "const": prompt }).to_value(),
+            );
+        }
+    }
+    if let Some(required_keys) = schema
+        .get_mut("required")
+        .get_or_insert(&mut json!(Vec::<String>::new()))
+        .as_array_mut()
+    {
+        required_keys.push(json!(key_name));
+    }
+
+    Some(schema)
+}
+
 /// the purpose of this type is to frame the language models output when handling a decision request
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub(crate) struct Decision {
