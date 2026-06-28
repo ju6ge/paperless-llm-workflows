@@ -1,5 +1,4 @@
 use futures::StreamExt;
-use itertools::any;
 use log::{error, info};
 use paperless_api_client::{
     Client,

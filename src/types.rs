@@ -1,12 +1,8 @@
 use chrono::NaiveDate;
 use once_cell::sync::Lazy;
-use paperless_api_client::{
-    types::{
-        Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, SourcesEnum, Workflow,
-        WorkflowActionRequest, WorkflowActionTypeEnum, WorkflowActionWebhookRequest,
-        WorkflowRequest, WorkflowTriggerRequest,
-    },
-    workflow_triggers::WorkflowTriggers,
+use paperless_api_client::types::{
+    Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, WorkflowActionRequest,
+    WorkflowActionTypeEnum, WorkflowActionWebhookRequest, WorkflowRequest, WorkflowTriggerRequest,
 };
 use regex::Regex;
 use schemars::{JsonSchema, Schema, json_schema, schema_for};
@@ -576,14 +572,12 @@ pub(crate) fn create_workflow_from_custom_field(
                 url: format!("{webhook_base_url}/fill/target_custom_field"),
                 use_params: Some(true),
                 as_json: Some(true),
-                params: Some(
-                    json!({
-                        "document_url":"{{ doc_url }}",
-                        "custom_field_id":custom_field.id,
-                        "prompt": None::<String>,
-                        "longtext_schema": None::<Value>
-                    }),
-                ),
+                params: Some(json!({
+                    "document_url":"{{ doc_url }}",
+                    "custom_field_id":custom_field.id,
+                    "prompt": None::<String>,
+                    "longtext_schema": None::<Value>
+                })),
                 body: None,
                 headers: None,
                 include_document: Some(false),
