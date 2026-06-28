@@ -63,6 +63,8 @@ host = "0.0.0.0"
 port = 8123
 # corresponding env var `PAPERLESS_SERVER`, defines were the paperless instnace is reachable
 paperless_server = "https://example-paperless.domain"
+# corresponting env var `WEBHOOK_PUBLIC_BASE_URL`, set reachable public ip of this webserver with this information paperless-llm-workflow can auto setup the required workflows for custom field filling
+webhook_public_base_url = "http(s)://paperless-llm-workflows.host{:optional-port}
 # corresponding env var `GGUF_MODEL_PATH`, defines where the gguf model file is located
 model = "/usr/share/paperless-field-extractor/model.gguf"
 # corresponding env var `NUM_GPU_LAYERS`, sets llama cpp option num_cpu_layers when initializing the inference backend zero here means unlimited, most models have way less layers ~50 so this should suffice for full offloading to gpu

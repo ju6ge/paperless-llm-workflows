@@ -55,6 +55,10 @@ struct Args {
     #[clap(long, global = true)]
     paperless_server: Option<String>,
 
+    /// URL of the paperless instance
+    #[clap(long, global = true)]
+    webhook_public_base_url: Option<String>,
+
     /// Path to the GGUF model file
     #[clap(long, global = true)]
     model: Option<String>,
@@ -135,6 +139,7 @@ async fn async_main() {
             host: args.host,
             port: args.port,
             paperless_server: args.paperless_server,
+            webhook_public_base_url: args.webhook_public_base_url,
             model: args.model,
             num_gpu_layers: args.num_gpu_layers,
             max_ctx: args.max_ctx,
