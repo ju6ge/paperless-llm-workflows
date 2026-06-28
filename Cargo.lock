@@ -1228,8 +1228,9 @@ dependencies = [
 
 [[package]]
 name = "gbnf"
-version = "0.2.5"
-source = "git+https://github.com/ju6ge/gbnf?branch=fix%2Fjson-string-exclude-all-unicode-chars-that-need-escaping#13a901a5f8151f1150fb6b539fcab3d177ed9f24"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ec69c519f528c90173091806e6ca168f401cd7f3f736f13a0460a1e2c9232d2"
 dependencies = [
  "serde",
  "serde_json",
