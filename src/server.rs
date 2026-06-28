@@ -318,6 +318,60 @@ async fn handle_decision(
     Ok(())
 }
 
+async fn handle_targeted_custom_field_prediction(
+    doc: &mut Document,
+    custom_field: CustomField,
+    prompt: Option<String>,
+) -> Result<(), DocumentProcessingError> {
+    let doc_data = serde_json::to_value(&doc).unwrap();
+
+    if let Some(field_grammar) = if let Some(prompt) = prompt {
+        crate::types::schema_from_custom_field_with_prompt(&custom_field, prompt)
+    } else {
+        crate::types::schema_from_custom_field(&custom_field)
+    } {
+        let extracted_cf = spawn_blocking(move || {
+            let mut model_singleton = MODEL_SINGLETON.blocking_lock();
+            if let Some(model) = model_singleton.as_mut() {
+                model.extract(&doc_data, &field_grammar, false)
+            } else {
+                Err(crate::extract::ModelError::ModelNotLoaded)
+            }
+        })
+        .await??;
+
+        let extracted_cf: FieldExtract =
+            serde_json::from_value(extracted_cf).map_err(FieldError::from)?;
+
+        if let Ok(cf_value) = extracted_cf
+            .to_custom_field_instance(&custom_field)
+            .map_err(|err| {
+                log::error!("{err}");
+                err
+            })
+        {
+            // update document custom fields on server side
+            // sending the updated document to the server will happen afterwards
+            log::debug!(
+                "Extracted custom field for document {}\n {:#?}",
+                doc.id,
+                cf_value
+            );
+            if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
+                for doc_cf_i in doc_custom_fields.iter_mut() {
+                    if doc_cf_i.field == cf_value.field {
+                        *doc_cf_i = cf_value.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // defered sync back to paperless instance
+    // after successfull finish the state of document on paperless will be updated by the update task
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 enum WebhookError {
     #[error("Document with id `{0}` does not exist!")]
