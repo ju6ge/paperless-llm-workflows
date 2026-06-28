@@ -361,6 +361,18 @@ struct FillAllCustomFields {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct TargetedCustomFieldFill {
+    /// url of the document that should be processed
+    document_url: String,
+    /// custom field id of the field to fill
+    custom_field_id: i64,
+    /// optional prompt to add more information to the context
+    prompt: Option<String>,
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
+    next_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct TitleSuggestParams {
     /// url of the document that should be processed
     document_url: String,
