@@ -1254,10 +1254,10 @@ async fn document_request_funnel(
 }
 
 #[derive(Debug, Clone)]
-struct PaperlessStatusTags {
-    processing: Tag,
-    finished: Tag,
-    error: Option<Tag>,
+pub(crate) struct PaperlessStatusTags {
+    pub processing: Tag,
+    pub finished: Tag,
+    pub error: Option<Tag>,
 }
 
 pub async fn run_server(
