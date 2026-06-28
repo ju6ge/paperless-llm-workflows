@@ -1,11 +1,20 @@
 use chrono::NaiveDate;
 use once_cell::sync::Lazy;
-use paperless_api_client::types::{Correspondent, CustomField, CustomFieldInstance, DataTypeEnum};
+use paperless_api_client::{
+    types::{
+        Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, SourcesEnum, Workflow,
+        WorkflowActionRequest, WorkflowActionTypeEnum, WorkflowActionWebhookRequest,
+        WorkflowRequest, WorkflowTriggerRequest,
+    },
+    workflow_triggers::WorkflowTriggers,
+};
 use regex::Regex;
 use schemars::{JsonSchema, Schema, json_schema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+
+use crate::server::PaperlessStatusTags;
 
 static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}\}");
 
@@ -465,10 +474,7 @@ pub(crate) fn schema_from_title_template(template: Option<&str>) -> schemars::Sc
 
     let mut properties_map = serde_json::Map::new();
     for key in &keys {
-        properties_map.insert(
-            key.clone(),
-            json!({"type": "string"}),
-        );
+        properties_map.insert(key.clone(), json!({"type": "string"}));
     }
 
     let schema_value: Value = json!({
@@ -478,4 +484,140 @@ pub(crate) fn schema_from_title_template(template: Option<&str>) -> schemars::Sc
     });
 
     serde_json::from_value(schema_value).unwrap()
+}
+
+/// generate a workflow filter query to check if the custom field on the document is empty
+fn gen_workflow_query_custom_field_is_null(custom_field: &CustomField) -> String {
+    let query = json!(["OR", [[custom_field.id, "isnull", "true"]]]);
+    serde_json::to_string(&query).unwrap()
+}
+
+/// generate a worflow for filling a specific custom field
+pub(crate) fn create_workflow_from_custom_field(
+    custom_field: &CustomField,
+    status_tags: PaperlessStatusTags,
+    webhook_base_url: &String,
+) -> WorkflowRequest {
+    let mut ignore_tags = vec![status_tags.processing.id];
+    if let Some(error_tag) = &status_tags.error {
+        ignore_tags.push(error_tag.id);
+    }
+    WorkflowRequest {
+        name: format!("🧠 Fill Field `{}`", custom_field.name),
+        order: Some(1000),
+        enabled: Some(false),
+        triggers: vec![
+            WorkflowTriggerRequest {
+                id: None,
+                type_: paperless_api_client::types::WorkflowTriggerTypeEnum::DocumentAdded,
+                sources: vec![],
+                filter_has_not_tags: Some(ignore_tags.clone()),
+                matching_algorithm: Some(
+                    paperless_api_client::types::WorkflowTriggerMatchingAlgorithmEnum::None,
+                ),
+                filter_custom_field_query: Some(gen_workflow_query_custom_field_is_null(
+                    custom_field,
+                )),
+                filter_path: None,
+                filter_filename: None,
+                filter_mailrule: None,
+                match_: None,
+                is_insensitive: None,
+                filter_has_tags: None,
+                filter_has_all_tags: None,
+                filter_has_not_correspondents: None,
+                filter_has_not_document_types: None,
+                filter_has_not_storage_paths: None,
+                filter_has_correspondent: None,
+                filter_has_document_type: None,
+                filter_has_storage_path: None,
+                schedule_offset_days: None,
+                schedule_is_recurring: None,
+                schedule_recurring_interval_days: None,
+                schedule_date_field: None,
+                schedule_date_custom_field: None,
+            },
+            WorkflowTriggerRequest {
+                id: None,
+                type_: paperless_api_client::types::WorkflowTriggerTypeEnum::DocumentUpdated,
+                sources: vec![], // empty matches all sources
+                filter_has_not_tags: Some(ignore_tags),
+                matching_algorithm: Some(
+                    paperless_api_client::types::WorkflowTriggerMatchingAlgorithmEnum::None,
+                ),
+                filter_custom_field_query: Some(gen_workflow_query_custom_field_is_null(
+                    custom_field,
+                )),
+                filter_path: None,
+                filter_filename: None,
+                filter_mailrule: None,
+                match_: None,
+                is_insensitive: None,
+                filter_has_tags: None,
+                filter_has_all_tags: None,
+                filter_has_not_correspondents: None,
+                filter_has_not_document_types: None,
+                filter_has_not_storage_paths: None,
+                filter_has_correspondent: None,
+                filter_has_document_type: None,
+                filter_has_storage_path: None,
+                schedule_offset_days: None,
+                schedule_is_recurring: None,
+                schedule_recurring_interval_days: None,
+                schedule_date_field: None,
+                schedule_date_custom_field: None,
+            },
+        ],
+        actions: vec![WorkflowActionRequest {
+            id: None,
+            type_: Some(WorkflowActionTypeEnum::Webhook),
+            webhook: Some(WorkflowActionWebhookRequest {
+                id: None,
+                url: format!("{webhook_base_url}/fill/target_custom_field"),
+                use_params: Some(true),
+                as_json: Some(true),
+                params: Some(
+                    json!({
+                        "document_url":"{{ doc_url }}",
+                        "custom_field_id":custom_field.id,
+                        "prompt": None::<String>,
+                        "longtext_schema": None::<Value>
+                    }),
+                ),
+                body: None,
+                headers: None,
+                include_document: Some(false),
+            }),
+            assign_title: None,
+            assign_tags: None,
+            assign_correspondent: None,
+            assign_document_type: None,
+            assign_storage_path: None,
+            assign_owner: None,
+            assign_view_users: None,
+            assign_view_groups: None,
+            assign_change_users: None,
+            assign_change_groups: None,
+            assign_custom_fields: None,
+            assign_custom_fields_values: None,
+            remove_all_tags: None,
+            remove_tags: None,
+            remove_all_correspondents: None,
+            remove_correspondents: None,
+            remove_all_document_types: None,
+            remove_document_types: None,
+            remove_all_storage_paths: None,
+            remove_storage_paths: None,
+            remove_custom_fields: None,
+            remove_all_custom_fields: None,
+            remove_all_owners: None,
+            remove_owners: None,
+            remove_all_permissions: None,
+            remove_view_users: None,
+            remove_view_groups: None,
+            remove_change_users: None,
+            remove_change_groups: None,
+            email: None,
+        }],
+    }
 }
