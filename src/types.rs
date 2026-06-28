@@ -98,7 +98,11 @@ impl FieldExtract {
                 })
             }
             paperless_api_client::types::DataTypeEnum::Longtext => {
-                let _parsed_value: String = serde_json::from_value(self.value.clone())?;
+                let _parsed_value: String = if self.value.is_string() {
+                    serde_json::from_value(self.value.clone())?
+                } else {
+                    serde_json::to_string_pretty(&self.value)?
+                };
                 Ok(CustomFieldInstance {
                     value: Some(self.value.clone()),
                     field: custom_field_spec.id,
