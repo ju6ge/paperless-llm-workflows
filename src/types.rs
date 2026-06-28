@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use once_cell::sync::Lazy;
 use paperless_api_client::types::{Correspondent, CustomField, CustomFieldInstance, DataTypeEnum};
 use regex::Regex;
-use schemars::{JsonSchema, json_schema, schema_for};
+use schemars::{JsonSchema, Schema, json_schema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -414,6 +414,14 @@ pub(crate) fn schema_from_custom_field_with_prompt(
     }
 
     Some(schema)
+}
+
+pub(crate) fn schema_with_longtext_format(schema: &mut Schema, format_schema: Value) {
+    if let Some(properties) = schema.get_mut("properties") {
+        if let Some(value_schema) = properties.get_mut("value") {
+            *value_schema = format_schema.clone();
+        }
+    }
 }
 
 /// the purpose of this type is to frame the language models output when handling a decision request
