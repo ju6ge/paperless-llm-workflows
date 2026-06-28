@@ -8,6 +8,7 @@ pub(crate) struct Config {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) paperless_server: String,
+    pub(crate) webhook_public_base_url: Option<String>,
     pub(crate) processing_tag: String,
     pub(crate) processing_color: String,
     pub(crate) finished_tag: String,
@@ -26,6 +27,7 @@ pub(crate) struct OverlayConfig {
     pub(crate) host: Option<String>,
     pub(crate) port: Option<u16>,
     pub(crate) paperless_server: Option<String>,
+    pub(crate) webhook_public_base_url: Option<String>,
     pub(crate) processing_tag: Option<String>,
     pub(crate) processing_color: Option<String>,
     pub(crate) finished_tag: Option<String>,
@@ -53,6 +55,7 @@ impl Config {
             host: "0.0.0.0".to_string(),
             port: 8123,
             paperless_server: "https://example-paperless.domain".to_string(),
+            webhook_public_base_url: None,
             processing_tag: "🧠 processing".to_string(),
             processing_color: "#ffe000".to_string(),
             finished_tag: "🏷️ finished".to_string(),
@@ -74,6 +77,13 @@ impl Config {
             paperless_server: overlay_config
                 .paperless_server
                 .unwrap_or(self.paperless_server),
+            webhook_public_base_url: if let Some(webhook_public_base_url) =
+                overlay_config.webhook_public_base_url
+            {
+                Some(webhook_public_base_url)
+            } else {
+                self.webhook_public_base_url
+            },
             processing_tag: overlay_config.processing_tag.unwrap_or(self.processing_tag),
             processing_color: overlay_config
                 .processing_color
@@ -119,6 +129,7 @@ impl OverlayConfig {
                 .ok()
                 .and_then(|num| num.parse().ok()),
             paperless_server: std::env::var("PAPERLESS_SERVER").ok(),
+            webhook_public_base_url: std::env::var("WEBHOOK_PULIC_HOST").ok(),
             processing_tag: std::env::var("PROCESSING_TAG_NAME").ok(),
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),
