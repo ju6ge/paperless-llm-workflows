@@ -5,7 +5,8 @@ use paperless_api_client::{
     Client,
     types::{
         Correspondent, CustomField, CustomFieldInstance, CustomFieldInstanceRequest, Document,
-        PatchedDocumentRequest, Suggestions, Tag, TagRequest, User, Workflow,
+        PatchedDocumentRequest, PatchedWorkflowTriggerRequest, Suggestions, Tag, TagRequest, User,
+        Workflow, WorkflowTrigger,
     },
 };
 
@@ -100,6 +101,47 @@ pub async fn get_generated_workflow_for_custom_fields<'a>(
         })
         .collect()
         .await
+}
+
+pub async fn update_workflow_trigger_ignore_tags<'a>(
+    client: &mut Client,
+    workflow_trigger: &WorkflowTrigger,
+    tags: &'a [&'a Tag],
+) {
+    let _ = client
+        .workflow_triggers()
+        .partial_update(
+            workflow_trigger
+                .id
+                .expect("id should always exist … probably a mistake in api spec"),
+            &PatchedWorkflowTriggerRequest {
+                filter_has_not_tags: Some(tags.iter().map(|t| t.id).collect()),
+                id: None,
+                sources: vec![],
+                type_: None,
+                filter_path: None,
+                filter_filename: None,
+                filter_mailrule: None,
+                matching_algorithm: None,
+                match_: None,
+                is_insensitive: None,
+                filter_has_tags: None,
+                filter_has_all_tags: None,
+                filter_custom_field_query: None,
+                filter_has_not_correspondents: None,
+                filter_has_not_document_types: None,
+                filter_has_not_storage_paths: None,
+                filter_has_correspondent: None,
+                filter_has_document_type: None,
+                filter_has_storage_path: None,
+                schedule_offset_days: None,
+                schedule_is_recurring: None,
+                schedule_recurring_interval_days: None,
+                schedule_date_field: None,
+                schedule_date_custom_field: None,
+            },
+        )
+        .await;
 }
 
 pub async fn fetch_tag_by_id_or_name(
