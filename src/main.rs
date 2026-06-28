@@ -1,4 +1,4 @@
-use std::{any, path::Path, process::exit};
+use std::{path::Path, process::exit};
 
 use clap::Parser;
 use config::{Config, OverlayConfig};
