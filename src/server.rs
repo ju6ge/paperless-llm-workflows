@@ -60,9 +60,10 @@ enum ProcessingType {
     CustomFieldPrediction {
         exclude_fields: Option<Vec<CustomField>>,
     },
-    TargetedCustomField{
+    TargetedCustomField {
         custom_field_id: i64,
-        prompt: Option<String>
+        prompt: Option<String>,
+        longtext_schema: Option<Value>
     },
     CorrespondentSuggest,
     DecsionTagFlow {
@@ -322,14 +323,18 @@ async fn handle_targeted_custom_field_prediction(
     doc: &mut Document,
     custom_field: CustomField,
     prompt: Option<String>,
+    longtext_format: Option<Value>,
 ) -> Result<(), DocumentProcessingError> {
     let doc_data = serde_json::to_value(&doc).unwrap();
 
-    if let Some(field_grammar) = if let Some(prompt) = prompt {
+    if let Some(mut field_grammar) = if let Some(prompt) = prompt {
         crate::types::schema_from_custom_field_with_prompt(&custom_field, prompt)
     } else {
         crate::types::schema_from_custom_field(&custom_field)
     } {
+        if matches!(custom_field.data_type, paperless_api_client::types::DataTypeEnum::Longtext) && let Some(longtext_format) = longtext_format {
+            crate::types::schema_with_longtext_format(&mut field_grammar, longtext_format);
+        }
         let extracted_cf = spawn_blocking(move || {
             let mut model_singleton = MODEL_SINGLETON.blocking_lock();
             if let Some(model) = model_singleton.as_mut() {
@@ -426,6 +431,8 @@ struct TargetedCustomFieldFill {
     custom_field_id: i64,
     /// optional prompt to add more information to the context
     prompt: Option<String>,
+    /// optional schema for longcontext fields, allow setting json schema for longtext fields to enforce format
+    longtext_schema: Option<Value>,
     /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
     next_tag: Option<String>,
 }
@@ -772,6 +779,7 @@ async fn targeted_custom_field_prediction(
             ProcessingType::TargetedCustomField {
                 custom_field_id: params.custom_field_id,
                 prompt: params.prompt.clone(),
+                longtext_schema: params.longtext_schema.clone()
             },
         )
         .await?;
@@ -888,6 +896,7 @@ fn merge_document_status(
         ProcessingType::TargetedCustomField {
             custom_field_id,
             prompt: _,
+            longtext_schema: _,
         } => {
             if let Some(updated_custom_fields) = &updated_doc.custom_fields {
                 if let Some(updated_cf) = updated_custom_fields
@@ -1002,6 +1011,7 @@ async fn document_updater(
                     ProcessingType::TargetedCustomField {
                         custom_field_id,
                         prompt: _,
+                        longtext_schema: _,
                     } => {
                         if let Some(cfis) = doc_req.document.custom_fields.as_ref()
                             && let Some(target_field_update) =
@@ -1170,12 +1180,14 @@ async fn document_processor(
                 ProcessingType::TargetedCustomField {
                     custom_field_id,
                     ref prompt,
+                    ref longtext_schema,
                 } => match api_client.custom_fields().retrieve(custom_field_id).await {
                     Ok(cf) => {
                         handle_targeted_custom_field_prediction(
                             &mut doc_process_req.document,
                             cf,
                             prompt.clone(),
+                            longtext_schema.clone()
                         )
                         .await
                     }
