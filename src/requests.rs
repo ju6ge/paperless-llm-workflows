@@ -326,7 +326,7 @@ pub(crate) async fn create_tag(
             name: tag_name.to_owned(),
             color: Some(tag_color.to_owned()),
             match_: Some("".to_string()),
-            matching_algorithm: Some(0),
+            matching_algorithm: Some(paperless_api_client::types::MatchingAlgorithm::None),
             is_insensitive: Some(true),
             is_inbox_tag: Some(false),
             owner: tag_user.map(|u| u.id),
