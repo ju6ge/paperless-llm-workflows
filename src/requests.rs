@@ -1,10 +1,11 @@
 use futures::StreamExt;
+use itertools::any;
 use log::{error, info};
 use paperless_api_client::{
     Client,
     types::{
         Correspondent, CustomField, CustomFieldInstance, CustomFieldInstanceRequest, Document,
-        PatchedDocumentRequest, Suggestions, Tag, TagRequest, User,
+        PatchedDocumentRequest, Suggestions, Tag, TagRequest, User, Workflow,
     },
 };
 
@@ -71,6 +72,31 @@ pub async fn get_all_custom_fields(client: &mut Client) -> Vec<CustomField> {
                     err
                 })
                 .ok()
+        })
+        .collect()
+        .await
+}
+
+pub async fn get_generated_workflow_for_custom_fields<'a>(
+    client: &mut Client,
+    custom_fields: &'a [CustomField],
+) -> Vec<(Workflow, &'a CustomField)> {
+    info!("Fetching workflows from server");
+    client
+        .workflows()
+        .list_stream(None)
+        .filter_map(async |workflow_result| {
+            let workflow = workflow_result.ok()?;
+            if workflow.name.starts_with("🧠") {
+                for cf in custom_fields {
+                    if workflow.name.contains(&cf.name) {
+                        return Some((workflow, cf));
+                    }
+                }
+                None
+            } else {
+                None
+            }
         })
         .collect()
         .await
