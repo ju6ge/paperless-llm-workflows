@@ -60,6 +60,10 @@ enum ProcessingType {
     CustomFieldPrediction {
         exclude_fields: Option<Vec<CustomField>>,
     },
+    TargetedCustomField{
+        custom_field_id: i64,
+        prompt: Option<String>
+    },
     CorrespondentSuggest,
     DecsionTagFlow {
         question: String,
@@ -778,6 +782,22 @@ fn merge_document_status(
         ProcessingType::TitleSuggest { template: _ } => {
             doc.title = updated_doc.title.clone();
         }
+        ProcessingType::TargetedCustomField {
+            custom_field_id,
+            prompt: _,
+        } => {
+            if let Some(updated_custom_fields) = &updated_doc.custom_fields {
+                if let Some(updated_cf) = updated_custom_fields
+                    .iter()
+                    .find(|cf| cf.field == *custom_field_id)
+                {
+                    if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
+                        doc_custom_fields.retain(|cf| cf.field != *custom_field_id);
+                        doc_custom_fields.push(updated_cf.clone());
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -874,6 +894,21 @@ async fn document_updater(
                             && !t.is_empty()
                         {
                             updated_title = Some(t.clone());
+                        }
+                    }
+                    ProcessingType::TargetedCustomField {
+                        custom_field_id,
+                        prompt: _,
+                    } => {
+                        if let Some(cfis) = doc_req.document.custom_fields.as_ref()
+                            && let Some(target_field_update) =
+                                cfis.iter().find(|cf| cf.field == *custom_field_id)
+                        {
+                            let cf_update_list = updated_cf.get_or_insert_default();
+                            cf_update_list.retain(|cf| cf.field != *custom_field_id);
+                            cf_update_list.push(target_field_update.clone());
+                        } else {
+                            // TODO should something happen if the targeted field was not updated 🤔
                         }
                     }
                 }
@@ -1029,6 +1064,10 @@ async fn document_processor(
                     )
                     .await
                 }
+                ProcessingType::TargetedCustomField {
+                    custom_field_id,
+                    prompt,
+                } => unimplemented!(),
             };
 
             let mut doc_in_queue_again = false;
