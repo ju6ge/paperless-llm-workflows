@@ -60,6 +60,11 @@ enum ProcessingType {
     CustomFieldPrediction {
         exclude_fields: Option<Vec<CustomField>>,
     },
+    TargetedCustomField {
+        custom_field_id: i64,
+        prompt: Option<String>,
+        longtext_schema: Option<Value>
+    },
     CorrespondentSuggest,
     DecsionTagFlow {
         question: String,
@@ -314,6 +319,64 @@ async fn handle_decision(
     Ok(())
 }
 
+async fn handle_targeted_custom_field_prediction(
+    doc: &mut Document,
+    custom_field: CustomField,
+    prompt: Option<String>,
+    longtext_format: Option<Value>,
+) -> Result<(), DocumentProcessingError> {
+    let doc_data = serde_json::to_value(&doc).unwrap();
+
+    if let Some(mut field_grammar) = if let Some(prompt) = prompt {
+        crate::types::schema_from_custom_field_with_prompt(&custom_field, prompt)
+    } else {
+        crate::types::schema_from_custom_field(&custom_field)
+    } {
+        if matches!(custom_field.data_type, paperless_api_client::types::DataTypeEnum::Longtext) && let Some(longtext_format) = longtext_format {
+            crate::types::schema_with_longtext_format(&mut field_grammar, longtext_format);
+        }
+        let extracted_cf = spawn_blocking(move || {
+            let mut model_singleton = MODEL_SINGLETON.blocking_lock();
+            if let Some(model) = model_singleton.as_mut() {
+                model.extract(&doc_data, &field_grammar, false)
+            } else {
+                Err(crate::extract::ModelError::ModelNotLoaded)
+            }
+        })
+        .await??;
+
+        let extracted_cf: FieldExtract =
+            serde_json::from_value(extracted_cf).map_err(FieldError::from)?;
+
+        if let Ok(cf_value) = extracted_cf
+            .to_custom_field_instance(&custom_field)
+            .map_err(|err| {
+                log::error!("{err}");
+                err
+            })
+        {
+            // update document custom fields on server side
+            // sending the updated document to the server will happen afterwards
+            log::debug!(
+                "Extracted custom field for document {}\n {:#?}",
+                doc.id,
+                cf_value
+            );
+            if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
+                for doc_cf_i in doc_custom_fields.iter_mut() {
+                    if doc_cf_i.field == cf_value.field {
+                        *doc_cf_i = cf_value.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // defered sync back to paperless instance
+    // after successfull finish the state of document on paperless will be updated by the update task
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 enum WebhookError {
     #[error("Document with id `{0}` does not exist!")]
@@ -356,6 +419,20 @@ struct FillAllCustomFields {
     ///
     /// must be either an integer referencing the custom field id, or string referencing the custom field name
     ignore_custom_fields: Option<Vec<Value>>,
+    /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
+    next_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+struct TargetedCustomFieldFill {
+    /// url of the document that should be processed
+    document_url: String,
+    /// custom field id of the field to fill
+    custom_field_id: i64,
+    /// optional prompt to add more information to the context
+    prompt: Option<String>,
+    /// optional schema for longcontext fields, allow setting json schema for longtext fields to enforce format
+    longtext_schema: Option<Value>,
     /// optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set
     next_tag: Option<String>,
 }
@@ -665,6 +742,50 @@ async fn custom_field_prediction(
     Ok(HttpResponse::Accepted().into())
 }
 
+#[utoipa::path(tag = "llm_workflow_trigger")]
+#[post("/fill/target_custom_field")]
+/// Workflow to fill a specific unfilled custom fields on a document
+///
+/// ## Supported Custom Field Types
+///
+/// Currently this projects predicting the following kinds of custom fields:
+/// - [x] Boolean
+/// - [x] Date
+/// - [x] Integer
+/// - [x] Number
+/// - [x] Monetary
+/// - [x] Text
+/// - [x] Select
+/// - [ ] Document Link
+/// - [ ] URL
+/// - [x] LargeText
+async fn targeted_custom_field_prediction(
+    params: web::Json<TargetedCustomFieldFill>,
+    status_tags: Data<PaperlessStatusTags>,
+    api_client: Data<Client>,
+    config: Data<Config>,
+    document_pipeline: web::Data<tokio::sync::mpsc::UnboundedSender<DocumentProcessingRequest>>,
+) -> Result<HttpResponse, WebhookError> {
+    let generic_webhook_params = WebhookParams {
+        document_url: params.document_url.clone(),
+        next_tag: params.next_tag.clone(),
+    };
+    generic_webhook_params
+        .handle_request(
+            status_tags,
+            api_client,
+            config,
+            document_pipeline,
+            ProcessingType::TargetedCustomField {
+                custom_field_id: params.custom_field_id,
+                prompt: params.prompt.clone(),
+                longtext_schema: params.longtext_schema.clone()
+            },
+        )
+        .await?;
+    Ok(HttpResponse::Accepted().into())
+}
+
 #[utoipa::path(tag = "llm_workflow_trigger", request_body = inline(TitleSuggestParams))]
 #[post("/suggest/title")]
 /// Workflow to suggest a document title
@@ -700,7 +821,13 @@ async fn suggest_title(
 
 #[derive(utoipa::OpenApi)]
 #[openapi(
-    paths(suggest_correspondent, custom_field_prediction, decision, suggest_title),
+    paths(
+        suggest_correspondent,
+        custom_field_prediction,
+        decision,
+        suggest_title,
+        targeted_custom_field_prediction
+    ),
     components(schemas(WebhookParams, TitleSuggestParams))
 )]
 pub(crate) struct DocumentProcessingApiSpec;
@@ -765,6 +892,23 @@ fn merge_document_status(
         }
         ProcessingType::TitleSuggest { template: _ } => {
             doc.title = updated_doc.title.clone();
+        }
+        ProcessingType::TargetedCustomField {
+            custom_field_id,
+            prompt: _,
+            longtext_schema: _,
+        } => {
+            if let Some(updated_custom_fields) = &updated_doc.custom_fields {
+                if let Some(updated_cf) = updated_custom_fields
+                    .iter()
+                    .find(|cf| cf.field == *custom_field_id)
+                {
+                    if let Some(doc_custom_fields) = doc.custom_fields.as_mut() {
+                        doc_custom_fields.retain(|cf| cf.field != *custom_field_id);
+                        doc_custom_fields.push(updated_cf.clone());
+                    }
+                }
+            }
         }
     }
 }
@@ -862,6 +1006,22 @@ async fn document_updater(
                             && !t.is_empty()
                         {
                             updated_title = Some(t.clone());
+                        }
+                    }
+                    ProcessingType::TargetedCustomField {
+                        custom_field_id,
+                        prompt: _,
+                        longtext_schema: _,
+                    } => {
+                        if let Some(cfis) = doc_req.document.custom_fields.as_ref()
+                            && let Some(target_field_update) =
+                                cfis.iter().find(|cf| cf.field == *custom_field_id)
+                        {
+                            let cf_update_list = updated_cf.get_or_insert_default();
+                            cf_update_list.retain(|cf| cf.field != *custom_field_id);
+                            cf_update_list.push(target_field_update.clone());
+                        } else {
+                            // TODO should something happen if the targeted field was not updated 🤔
                         }
                     }
                 }
@@ -1017,6 +1177,22 @@ async fn document_processor(
                     )
                     .await
                 }
+                ProcessingType::TargetedCustomField {
+                    custom_field_id,
+                    ref prompt,
+                    ref longtext_schema,
+                } => match api_client.custom_fields().retrieve(custom_field_id).await {
+                    Ok(cf) => {
+                        handle_targeted_custom_field_prediction(
+                            &mut doc_process_req.document,
+                            cf,
+                            prompt.clone(),
+                            longtext_schema.clone()
+                        )
+                        .await
+                    }
+                    Err(err) => Err(DocumentProcessingError::from(err)),
+                },
             };
 
             let mut doc_in_queue_again = false;

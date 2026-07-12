@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- added api endpoint to for targeted custom field filling #17
+
 ## [ 0.4.0 - 2026-06-19]
 
 ### Added
