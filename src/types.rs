@@ -17,7 +17,7 @@ static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}
 #[derive(Serialize, Deserialize, JsonSchema)]
 /// Structure to extract currency data from a document
 pub(crate) struct CurrencyValue {
-    value: f64,
+    amount: f64,
     currency_code: String,
 }
 
@@ -140,7 +140,7 @@ impl FieldExtract {
                 Ok(CustomFieldInstance {
                     value: Some(Value::String(format!(
                         "{}{:.2}",
-                        parsed_currency_value.currency_code, parsed_currency_value.value
+                        parsed_currency_value.currency_code, parsed_currency_value.amount
                     ))),
                     field: custom_field_spec.id,
                 })
