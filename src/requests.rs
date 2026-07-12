@@ -4,7 +4,8 @@ use paperless_api_client::{
     Client,
     types::{
         Correspondent, CustomField, CustomFieldInstance, CustomFieldInstanceRequest, Document,
-        PatchedDocumentRequest, Suggestions, Tag, TagRequest, User,
+        PatchedDocumentRequest, PatchedWorkflowTriggerRequest, Suggestions, Tag, TagRequest, User,
+        Workflow, WorkflowTrigger,
     },
 };
 
@@ -74,6 +75,72 @@ pub async fn get_all_custom_fields(client: &mut Client) -> Vec<CustomField> {
         })
         .collect()
         .await
+}
+
+pub async fn get_generated_workflow_for_custom_fields<'a>(
+    client: &mut Client,
+    custom_fields: &'a [CustomField],
+) -> Vec<(Workflow, &'a CustomField)> {
+    info!("Fetching workflows from server");
+    client
+        .workflows()
+        .list_stream(None)
+        .filter_map(async |workflow_result| {
+            let workflow = workflow_result.ok()?;
+            if workflow.name.starts_with("🧠") {
+                for cf in custom_fields {
+                    if workflow.name.contains(&cf.name) {
+                        return Some((workflow, cf));
+                    }
+                }
+                None
+            } else {
+                None
+            }
+        })
+        .collect()
+        .await
+}
+
+pub async fn update_workflow_trigger_ignore_tags<'a>(
+    client: &mut Client,
+    workflow_trigger: &WorkflowTrigger,
+    tags: &'a [&'a Tag],
+) {
+    let _ = client
+        .workflow_triggers()
+        .partial_update(
+            workflow_trigger
+                .id
+                .expect("id should always exist … probably a mistake in api spec"),
+            &PatchedWorkflowTriggerRequest {
+                filter_has_not_tags: Some(tags.iter().map(|t| t.id).collect()),
+                id: None,
+                sources: vec![],
+                type_: None,
+                filter_path: None,
+                filter_filename: None,
+                filter_mailrule: None,
+                matching_algorithm: None,
+                match_: None,
+                is_insensitive: None,
+                filter_has_tags: None,
+                filter_has_all_tags: None,
+                filter_custom_field_query: None,
+                filter_has_not_correspondents: None,
+                filter_has_not_document_types: None,
+                filter_has_not_storage_paths: None,
+                filter_has_correspondent: None,
+                filter_has_document_type: None,
+                filter_has_storage_path: None,
+                schedule_offset_days: None,
+                schedule_is_recurring: None,
+                schedule_recurring_interval_days: None,
+                schedule_date_field: None,
+                schedule_date_custom_field: None,
+            },
+        )
+        .await;
 }
 
 pub async fn fetch_tag_by_id_or_name(
@@ -326,7 +393,7 @@ pub(crate) async fn create_tag(
             name: tag_name.to_owned(),
             color: Some(tag_color.to_owned()),
             match_: Some("".to_string()),
-            matching_algorithm: Some(0),
+            matching_algorithm: Some(paperless_api_client::types::MatchingAlgorithm::None),
             is_insensitive: Some(true),
             is_inbox_tag: Some(false),
             owner: tag_user.map(|u| u.id),

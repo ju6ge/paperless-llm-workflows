@@ -2,8 +2,10 @@ use std::{path::Path, process::exit};
 
 use clap::Parser;
 use config::{Config, OverlayConfig};
+use itertools::any;
 use paperless_api_client::Client;
-use server::run_server;
+use server::{PaperlessStatusTags, run_server};
+use types::custom_field_learning_supported;
 use utoipa::OpenApi;
 
 #[cfg(feature = "benchmark")]
@@ -31,7 +33,12 @@ compile_error!(
     "Only one compute backend can be used, choose feature `vulkan`, `openmp`, `cuda`, `rocm`!"
 );
 
-#[cfg(not(any(feature = "vulkan", feature = "openmp", feature = "cuda", feature = "rocm")))]
+#[cfg(not(any(
+    feature = "vulkan",
+    feature = "openmp",
+    feature = "cuda",
+    feature = "rocm"
+)))]
 compile_error!(
     "Choose feature `vulkan`, `openmp`, `cuda` or `rocm` to select what compute backend should be used for inference!"
 );
@@ -54,6 +61,10 @@ struct Args {
     /// URL of the paperless instance
     #[clap(long, global = true)]
     paperless_server: Option<String>,
+
+    /// URL of the paperless instance
+    #[clap(long, global = true)]
+    webhook_public_base_url: Option<String>,
 
     /// Path to the GGUF model file
     #[clap(long, global = true)]
@@ -135,6 +146,7 @@ async fn async_main() {
             host: args.host,
             port: args.port,
             paperless_server: args.paperless_server,
+            webhook_public_base_url: args.webhook_public_base_url,
             model: args.model,
             num_gpu_layers: args.num_gpu_layers,
             max_ctx: args.max_ctx,
@@ -289,6 +301,65 @@ async fn async_main() {
     } else {
         None
     };
+
+    if let Some(webhook_pulic_url) = &config.webhook_public_base_url {
+        let all_supported_custom_fields = requests::get_all_custom_fields(&mut api_client)
+            .await
+            .into_iter()
+            .filter(|cf| custom_field_learning_supported(&cf))
+            .collect::<Vec<_>>();
+
+        let all_generated_workflows = requests::get_generated_workflow_for_custom_fields(
+            &mut api_client,
+            &all_supported_custom_fields,
+        )
+        .await;
+
+        // if error tag was enabled later, update workflow triggers to account for it
+        if let Some(error_tag) = &error_tag {
+            for wf_trigger in all_generated_workflows
+                .iter()
+                .map(|(w, _c)| w.triggers.clone())
+                .flatten()
+            {
+                if wf_trigger
+                    .filter_has_not_tags
+                    .as_ref()
+                    .is_some_and(|igonred_tag_ids| !igonred_tag_ids.contains(&error_tag.id))
+                {
+                    requests::update_workflow_trigger_ignore_tags(
+                        &mut api_client,
+                        &wf_trigger,
+                        &[&processing_tag, error_tag],
+                    )
+                    .await;
+                }
+            }
+        }
+
+        // generate workflows for all custom fields that are supported but don't have a dedicated workflow yet
+        let custom_fields_without_workflow = all_supported_custom_fields
+            .iter()
+            .filter(|cf| {
+                !any(all_generated_workflows.iter(), |wf_cf_match| {
+                    wf_cf_match.1 == *cf
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for cf in custom_fields_without_workflow {
+            let wfr = types::create_workflow_from_custom_field(
+                cf,
+                PaperlessStatusTags {
+                    processing: processing_tag.clone(),
+                    finished: finished_tag.clone(),
+                    error: error_tag.clone(),
+                },
+                webhook_pulic_url,
+            );
+            let _ = api_client.workflows().create(&wfr).await;
+        }
+    }
 
     let _ = run_server(config, processing_tag, finished_tag, error_tag, api_client).await;
 }

@@ -63,7 +63,7 @@ enum ProcessingType {
     TargetedCustomField {
         custom_field_id: i64,
         prompt: Option<String>,
-        longtext_schema: Option<Value>
+        longtext_schema: Option<Value>,
     },
     CorrespondentSuggest,
     DecsionTagFlow {
@@ -262,7 +262,8 @@ async fn handle_title_suggestion(
         _ => {
             let fields: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_value(extracted).map_err(FieldError::from)?;
-            fields.get("title")
+            fields
+                .get("title")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string()
@@ -332,7 +333,11 @@ async fn handle_targeted_custom_field_prediction(
     } else {
         crate::types::schema_from_custom_field(&custom_field)
     } {
-        if matches!(custom_field.data_type, paperless_api_client::types::DataTypeEnum::Longtext) && let Some(longtext_format) = longtext_format {
+        if matches!(
+            custom_field.data_type,
+            paperless_api_client::types::DataTypeEnum::Longtext
+        ) && let Some(longtext_format) = longtext_format
+        {
             crate::types::schema_with_longtext_format(&mut field_grammar, longtext_format);
         }
         let extracted_cf = spawn_blocking(move || {
@@ -779,7 +784,7 @@ async fn targeted_custom_field_prediction(
             ProcessingType::TargetedCustomField {
                 custom_field_id: params.custom_field_id,
                 prompt: params.prompt.clone(),
-                longtext_schema: params.longtext_schema.clone()
+                longtext_schema: params.longtext_schema.clone(),
             },
         )
         .await?;
@@ -1187,7 +1192,7 @@ async fn document_processor(
                             &mut doc_process_req.document,
                             cf,
                             prompt.clone(),
-                            longtext_schema.clone()
+                            longtext_schema.clone(),
                         )
                         .await
                     }
@@ -1254,10 +1259,10 @@ async fn document_request_funnel(
 }
 
 #[derive(Debug, Clone)]
-struct PaperlessStatusTags {
-    processing: Tag,
-    finished: Tag,
-    error: Option<Tag>,
+pub(crate) struct PaperlessStatusTags {
+    pub processing: Tag,
+    pub finished: Tag,
+    pub error: Option<Tag>,
 }
 
 pub async fn run_server(
