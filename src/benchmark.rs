@@ -28,7 +28,7 @@ use tokio::{
 
 use crate::{
     config::Config,
-    extract::LLModelExtractor,
+    extract::{LLModelExtractor, TokenGenerationStats},
     requests,
     tui::BenchmarkApp,
     types::{
@@ -97,8 +97,11 @@ pub(crate) struct SingleResult {
     doc_id: i64,
     expected_result: Value,
     benchmark_result: Value,
+    #[serde(default)]
+    raw_output: Value,
     success: bool,
     error: Option<String>,
+    token_stats: Option<TokenGenerationStats>,
 }
 
 #[derive(Tabled)]
@@ -207,6 +210,12 @@ pub(crate) enum ProgressUpdate {
         doc_id: i64,
         progress: usize,
         total: usize,
+        cumulative_token_stats: TokenGenerationStats,
+    },
+    /// per-document instantaneous token performance stats
+    TokenStats {
+        model_name: String,
+        doc_token_stats: TokenGenerationStats,
     },
     /// intermediary or final benchmark result state
     BenchmarkResults {
@@ -225,6 +234,7 @@ struct BenchmarkContext<'a> {
     custom_fields: &'a Vec<CustomField>,
     crrspndents: &'a Vec<Correspondent>,
     results: &'a mut BenchmarkResults,
+    model_name: &'a str,
 }
 
 fn filename_to_result_name(path: &Path) -> String {
@@ -247,11 +257,8 @@ fn filename_to_result_name(path: &Path) -> String {
 }
 
 fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
-    // unused variables - these are parameters that are not used in the function
     let valid_doc_state = ctx.doc.clone();
     let mut test_doc_state = ctx.doc.clone();
-    // make sure custom fields are unpopulated for the document data used
-    // for testing the extraction of custom fields
     test_doc_state.custom_fields = None;
 
     if let Some(valid_doc_cfs) = &valid_doc_state.custom_fields {
@@ -270,24 +277,51 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
         {
             if let Some(cf_grammar) = schema_from_custom_field(&doc_cf.0) {
                 let doc_data = serde_json::to_value(&test_doc_state).unwrap();
+                let (stats_tx, stats_rx) =
+                    std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+                let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let model_name = ctx.model_name.to_string();
 
-                match ctx.model.extract(&doc_data, &cf_grammar, false) {
+                let rx_stats = last_stats.clone();
+                let model_name_live = model_name.clone();
+                let rx_handle = std::thread::spawn(move || {
+                    for stats in stats_rx.iter() {
+                        let _ = writeln!(
+                            std::io::stdout(),
+                            "{}",
+                            serde_json::to_string(&ProgressUpdate::TokenStats {
+                                model_name: model_name_live.clone(),
+                                doc_token_stats: stats.clone(),
+                            })
+                            .unwrap()
+                        );
+                        *rx_stats.lock().unwrap() = Some(stats);
+                    }
+                });
+
+                match ctx
+                    .model
+                    .extract(&doc_data, &cf_grammar, false, Some(stats_tx))
+                {
                     Ok(extracted_value) => {
-                        let field_extract: FieldExtract = serde_json::from_value(extracted_value)
+                        let _ = rx_handle.join();
+                        let last_stats = last_stats.lock().unwrap().clone();
+
+                        let field_extract: FieldExtract = serde_json::from_value(extracted_value.clone())
                             .expect("grammar forced output to match type");
                         match field_extract.to_custom_field_instance(&doc_cf.0) {
                             Ok(extracted_cfi) => {
                                 if extracted_cfi == *doc_cf.1 {
-                                    // the extracted value corresponds exactly to the value of the validated documen
-                                    // so this is the only case that is considered a success
                                     ctx.results.results.push(SingleResult {
                                         benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                                         doc_id: ctx.doc.id,
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
+                                        raw_output: extracted_value,
                                         success: true,
                                         error: None,
+                                        token_stats: last_stats,
                                     });
                                 } else {
                                     ctx.results.results.push(SingleResult {
@@ -296,8 +330,10 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                         expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                         benchmark_result: serde_json::to_value(extracted_cfi)
                                             .unwrap(),
+                                        raw_output: extracted_value,
                                         success: false,
                                         error: None,
+                                        token_stats: last_stats,
                                     });
                                 }
                             }
@@ -307,20 +343,27 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
                                     doc_id: ctx.doc.id,
                                     expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                                     benchmark_result: serde_json::to_value(&field_extract).unwrap(),
+                                    raw_output: extracted_value,
                                     success: false,
                                     error: Some(err.to_string()),
+                                    token_stats: last_stats,
                                 });
                             }
                         }
                     }
                     Err(model_err) => {
+                        let _ = rx_handle.join();
+                        let last_stats = last_stats.lock().unwrap().clone();
+
                         ctx.results.results.push(SingleResult {
                             benchmark_type: BenchmarkResultType::CustomFieldExtraction,
                             doc_id: ctx.doc.id,
                             expected_result: serde_json::to_value(doc_cf.1).unwrap(),
                             benchmark_result: Value::Null,
+                            raw_output: Value::Null,
                             success: false,
                             error: Some(model_err.to_string()),
+                            token_stats: last_stats,
                         });
                     }
                 }
@@ -332,7 +375,6 @@ fn run_custom_field_benchmark(ctx: &mut BenchmarkContext) {
 fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
     let crrspndts_suggest_schema =
         crate::types::schema_from_correspondents(&ctx.crrspndents.as_slice());
-    // unused variables - these are parameters that are not used in the function
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
     if let Some(expected_correspondent) = ctx
@@ -341,12 +383,36 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
         .map(|dcr| ctx.crrspndents.iter().find(|c| c.id == dcr))
         .flatten()
     {
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+        let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let model_name = ctx.model_name.to_string();
+
+        let rx_stats = last_stats.clone();
+        let model_name_live = model_name.clone();
+        let rx_handle = std::thread::spawn(move || {
+            for stats in stats_rx.iter() {
+                let _ = writeln!(
+                    std::io::stdout(),
+                    "{}",
+                    serde_json::to_string(&ProgressUpdate::TokenStats {
+                        model_name: model_name_live.clone(),
+                        doc_token_stats: stats.clone(),
+                    })
+                    .unwrap()
+                );
+                *rx_stats.lock().unwrap() = Some(stats);
+            }
+        });
+
         match ctx
             .model
-            .extract(&doc_data, &crrspndts_suggest_schema, false)
+            .extract(&doc_data, &crrspndts_suggest_schema, false, Some(stats_tx))
         {
             Ok(model_result_value) => {
-                let field_extract: FieldExtract = serde_json::from_value(model_result_value)
+                let _ = rx_handle.join();
+                let last_stats = last_stats.lock().unwrap().clone();
+
+                let field_extract: FieldExtract = serde_json::from_value(model_result_value.clone())
                     .expect("grammar enforces output matches type");
                 match field_extract.to_correspondent(&ctx.crrspndents.as_slice()) {
                     Ok(suggested_crrspndnt) => {
@@ -360,8 +426,10 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                 .unwrap(),
                                 benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
                                     .unwrap(),
+                                raw_output: model_result_value,
                                 success: true,
                                 error: None,
+                                token_stats: last_stats,
                             });
                         } else {
                             ctx.results.results.push(SingleResult {
@@ -373,8 +441,10 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                                 .unwrap(),
                                 benchmark_result: serde_json::to_value(&suggested_crrspndnt.name)
                                     .unwrap(),
+                                raw_output: model_result_value,
                                 success: false,
                                 error: None,
+                                token_stats: last_stats,
                             });
                         }
                     }
@@ -387,21 +457,28 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
                             )
                             .unwrap(),
                             benchmark_result: serde_json::to_value(&field_extract).unwrap(),
+                            raw_output: model_result_value,
                             success: false,
                             error: Some(err.to_string()),
+                            token_stats: last_stats,
                         });
                     }
                 }
             }
             Err(model_error) => {
+                let _ = rx_handle.join();
+                let last_stats = last_stats.lock().unwrap().clone();
+
                 ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::CorrespondentSuggest,
                     doc_id: ctx.doc.id,
                     expected_result: serde_json::to_value(expected_correspondent.name.clone())
                         .unwrap(),
                     benchmark_result: Value::Null,
+                    raw_output: Value::Null,
                     success: false,
                     error: Some(model_error.to_string()),
+                    token_stats: last_stats,
                 });
             }
         }
@@ -419,7 +496,6 @@ fn run_correspondent_suggest_benchmark(ctx: &mut BenchmarkContext) {
 fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
     let doc_data = serde_json::to_value(&ctx.doc.content).unwrap();
 
-    // simple question is the correspondent correct, only if doc has correspondent!
     if let Some(expected_correspondent) = ctx
         .doc
         .correspondent
@@ -431,8 +507,35 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
             expected_correspondent.name
         );
         let question_schema = schema_from_decision_question(&expected_yes_question);
-        match ctx.model.extract(&doc_data, &question_schema, false) {
+        let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+        let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let model_name = ctx.model_name.to_string();
+
+        let rx_stats = last_stats.clone();
+        let model_name_live = model_name.clone();
+        let rx_handle = std::thread::spawn(move || {
+            for stats in stats_rx.iter() {
+                let _ = writeln!(
+                    std::io::stdout(),
+                    "{}",
+                    serde_json::to_string(&ProgressUpdate::TokenStats {
+                        model_name: model_name_live.clone(),
+                        doc_token_stats: stats.clone(),
+                    })
+                    .unwrap()
+                );
+                *rx_stats.lock().unwrap() = Some(stats);
+            }
+        });
+
+        match ctx
+            .model
+            .extract(&doc_data, &question_schema, false, Some(stats_tx))
+        {
             Ok(model_answer_value) => {
+                let _ = rx_handle.join();
+                let last_stats = last_stats.lock().unwrap().clone();
+
                 let model_decision: Decision = serde_json::from_value(model_answer_value.clone())
                     .expect("grammar constrains output to match type");
                 if model_decision.answer_bool {
@@ -441,8 +544,10 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: true,
                         error: None,
+                        token_stats: last_stats,
                     });
                 } else {
                     ctx.results.results.push(SingleResult {
@@ -450,24 +555,30 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(true),
                         benchmark_result: model_answer_value,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: false,
                         error: None,
+                        token_stats: last_stats,
                     });
                 }
             }
             Err(model_err) => {
+                let _ = rx_handle.join();
+                let last_stats = last_stats.lock().unwrap().clone();
+
                 ctx.results.results.push(SingleResult {
                     benchmark_type: BenchmarkResultType::DecideValidCorrespondent,
                     doc_id: ctx.doc.id,
                     expected_result: Value::Bool(true),
                     benchmark_result: Value::Null,
+                    raw_output: Value::Null, // hame as benchmark_result
                     success: false,
                     error: Some(model_err.to_string()),
+                    token_stats: last_stats,
                 });
             }
         }
 
-        // only if there is only one possible correspondent, then this case will not run, because there is no false correspondent to select from …
         if let Some(random_incorrect_correspondent) = ctx
             .crrspndents
             .iter()
@@ -479,8 +590,35 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                 random_incorrect_correspondent.name
             );
             let question_schema = schema_from_decision_question(&expected_no_question);
-            match ctx.model.extract(&doc_data, &question_schema, false) {
+            let (stats_tx, stats_rx) = std::sync::mpsc::sync_channel::<TokenGenerationStats>(64);
+            let last_stats = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let model_name = ctx.model_name.to_string();
+
+            let rx_stats = last_stats.clone();
+            let model_name_live = model_name.clone();
+            let rx_handle = std::thread::spawn(move || {
+                for stats in stats_rx.iter() {
+                    let _ = writeln!(
+                        std::io::stdout(),
+                        "{}",
+                        serde_json::to_string(&ProgressUpdate::TokenStats {
+                            model_name: model_name_live.clone(),
+                            doc_token_stats: stats.clone(),
+                        })
+                        .unwrap()
+                    );
+                    *rx_stats.lock().unwrap() = Some(stats);
+                }
+            });
+
+            match ctx
+                .model
+                .extract(&doc_data, &question_schema, false, Some(stats_tx))
+            {
                 Ok(model_answer_value) => {
+                    let _ = rx_handle.join();
+                    let last_stats = last_stats.lock().unwrap().clone();
+
                     let model_decision: Decision =
                         serde_json::from_value(model_answer_value.clone())
                             .expect("grammar constrains output to match type");
@@ -490,8 +628,10 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
+                            raw_output: Value::Null, // hame as benchmark_result
                             success: true,
                             error: None,
+                            token_stats: last_stats,
                         });
                     } else {
                         ctx.results.results.push(SingleResult {
@@ -499,19 +639,26 @@ fn run_decision_benchmarks(ctx: &mut BenchmarkContext) {
                             doc_id: ctx.doc.id,
                             expected_result: Value::Bool(false),
                             benchmark_result: model_answer_value,
+                            raw_output: Value::Null, // hame as benchmark_result
                             success: false,
                             error: None,
+                            token_stats: last_stats,
                         });
                     }
                 }
                 Err(model_err) => {
+                    let _ = rx_handle.join();
+                    let last_stats = last_stats.lock().unwrap().clone();
+
                     ctx.results.results.push(SingleResult {
                         benchmark_type: BenchmarkResultType::DecideInvalidCorrespondent,
                         doc_id: ctx.doc.id,
                         expected_result: Value::Bool(false),
                         benchmark_result: Value::Null,
+                        raw_output: Value::Null, // hame as benchmark_result
                         success: false,
                         error: Some(model_err.to_string()),
+                        token_stats: last_stats,
                     });
                 }
             }
@@ -529,16 +676,18 @@ fn run_benchmark_for_document(
     log_to_stdio: bool,
     doc_index: usize,
     total_docs: usize,
-) {
+) -> TokenGenerationStats {
     let mut ctx = BenchmarkContext {
         model,
         doc,
         custom_fields,
         crrspndents,
         results,
+        model_name,
     };
 
-    // Run all benchmark types
+    let results_before = ctx.results.results.len();
+
     run_custom_field_benchmark(&mut ctx);
     if log_to_stdio {
         let _ = writeln!(
@@ -577,7 +726,14 @@ fn run_benchmark_for_document(
         );
     }
 
-    // Send stats update
+    // Accumulate token stats from newly added results
+    let mut cumulative_stats = TokenGenerationStats::new();
+    for r in ctx.results.results.iter().skip(results_before) {
+        if let Some(ref s) = r.token_stats {
+            cumulative_stats.add(s);
+        }
+    }
+
     if log_to_stdio {
         let _ = writeln!(
             std::io::stdout(),
@@ -587,10 +743,13 @@ fn run_benchmark_for_document(
                 doc_id: doc.id,
                 progress: doc_index + 1,
                 total: total_docs,
+                cumulative_token_stats: cumulative_stats.clone(),
             })
             .unwrap()
         );
     }
+
+    cumulative_stats
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -599,6 +758,7 @@ struct BenchmarkWorkerData {
     doc_to_process: Vec<Document>,
     custom_fields: Vec<CustomField>,
     crrspndents: Vec<Correspondent>,
+    last_results: Option<BenchmarkResults>
 }
 
 /// Helper method to manage benchmark subprocess and handle progress updates
@@ -611,6 +771,7 @@ async fn start_benchmark_subprocess(
     progress_sender: tokio::sync::mpsc::UnboundedSender<ProgressUpdate>,
     shared_running_flag: Arc<tokio::sync::RwLock<bool>>,
     result_path: Option<PathBuf>,
+    last_results: Option<BenchmarkResults>,
 ) -> Result<(), String> {
     let ownbinary = env::current_exe()
         .expect("failed to get current executable path")
@@ -630,6 +791,7 @@ async fn start_benchmark_subprocess(
         doc_to_process,
         custom_fields,
         crrspndents,
+        last_results,
     })
     .unwrap();
     let _ = stdin.write_all(benchmark_run_data.as_bytes()).await;
@@ -848,20 +1010,77 @@ impl MultiBenchmarkParameters {
                 total_docs: docs_for_model.len(),
             });
 
-            if self.continue_last {
+            let last_results = if self.continue_last {
                 if let Ok(result_file) = OpenOptions::new().read(true).open(&result_path) {
-                    let result_data: BenchmarkResults =
+                    let mut result_data: BenchmarkResults =
                         serde_json::from_reader(&result_file).unwrap();
+                    // remove document that where not fully processed from result_data
+                    // this might result in some duplicate work of the model, but it seems easier
+                    // that rewriting the entire processing logic to detect exactly which test
+                    // cases have not been run
+                    let unfinished_document_results = result_data
+                        .results
+                        .iter()
+                        .into_group_map_by(|sr| sr.doc_id)
+                        .iter()
+                        // map of single results for each document id
+                        .map(|x| {
+                            (x.0, x.1.len()) // count results per document
+                        })
+                        .filter_map(|x| {
+                            // compare with expected amount of results for each document
+                            let expected_result_count = docs_for_model
+                                .iter()
+                                .find(|d| d.id == *x.0)
+                                .and_then(|d| {
+                                    // count amount of custom fields that support learning
+                                    d.clone().custom_fields.and_then(|cfs| {
+                                        Some(
+                                            cfs.iter()
+                                                .filter_map(|cfi| {
+                                                    custom_fields
+                                                        .iter()
+                                                        .find(|cf| cf.id == cfi.field)
+                                                        .filter(|cf| {
+                                                            custom_field_learning_supported(cf)
+                                                        })
+                                                })
+                                                .count(),
+                                        )
+                                    })
+                                })
+                                .unwrap_or(0)
+                                + 3;
+                            if x.1 < expected_result_count {
+                                Some(*x.0)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    // update result list to only contain fully finished processed document
+                    result_data.results = result_data
+                        .results
+                        .into_iter()
+                        .filter_map(|sr| {
+                            if !unfinished_document_results.contains(&sr.doc_id) {
+                                Some(sr)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    // figure out which document have not been processed yet for this model
                     docs_for_model = docs_for_model
                         .into_iter()
                         .filter(|doc| {
-                            !longest_result.as_ref().is_some_and(|lr| {
-                                lr.results
-                                    .iter()
-                                    .map(|sr| sr.doc_id)
-                                    .dedup()
-                                    .contains(&doc.id)
-                            })
+                            !result_data
+                                .results
+                                .iter()
+                                .map(|pd| pd.doc_id)
+                                .contains(&doc.id)
                         })
                         .collect();
                     let _ = tx_clone.send(ProgressUpdate::DocumentProgress {
@@ -874,10 +1093,11 @@ impl MultiBenchmarkParameters {
                             .dedup()
                             .count(),
                         total: doc_to_process.len(),
+                        cumulative_token_stats: TokenGenerationStats::new(),
                     });
                     let _ = tx_clone.send(ProgressUpdate::BenchmarkResults {
                         model_name: model_name.clone(),
-                        results: result_data,
+                        results: result_data.clone()
                     });
                     if docs_for_model.is_empty() {
                         let _ = tx_clone.send(ProgressUpdate::Finished {
@@ -885,8 +1105,13 @@ impl MultiBenchmarkParameters {
                         });
                         continue;
                     }
+                    Some(result_data)
+                } else {
+                    None
                 }
-            }
+            } else {
+                None
+            };
 
             // Start benchmark worker with semaphore
             let semaphore_clone = semaphore.clone();
@@ -906,6 +1131,7 @@ impl MultiBenchmarkParameters {
                             tx_clone.clone(),
                             shared_running_flag_clone,
                             Some(result_path_clone),
+                            last_results
                         )
                         .await
                         {
@@ -973,7 +1199,13 @@ pub(crate) fn benchmark_worker() {
         Some(benchmark_job_data.config.max_ctx as u32)
     };
 
-    let mut benchmark_results = BenchmarkResults::init_empty(&benchmark_job_data.config.model);
+    let mut benchmark_results = if let Some(last_results) = benchmark_job_data.last_results {
+        last_results
+    } else {
+        BenchmarkResults::init_empty(&benchmark_job_data.config.model)
+    };
+
+    let previously_finished_docs = benchmark_results.results.iter().map(|sr| sr.doc_id).dedup().count();
     let mut model = LLModelExtractor::new(
         Path::new(&benchmark_job_data.config.model),
         benchmark_job_data.config.num_gpu_layers,
@@ -993,8 +1225,9 @@ pub(crate) fn benchmark_worker() {
         .unwrap()
     );
 
+    let mut overall_stats = TokenGenerationStats::new();
     for (i, doc) in benchmark_job_data.doc_to_process.iter().enumerate() {
-        run_benchmark_for_document(
+        let doc_stats = run_benchmark_for_document(
             &model_name,
             &mut model,
             doc,
@@ -1002,9 +1235,10 @@ pub(crate) fn benchmark_worker() {
             &benchmark_job_data.crrspndents,
             &mut benchmark_results,
             true,
-            i,
-            benchmark_job_data.doc_to_process.len(),
+            i + previously_finished_docs,
+            benchmark_job_data.doc_to_process.len() + previously_finished_docs,
         );
+        overall_stats.add(&doc_stats);
     }
 
     // Send completion notification
@@ -1132,6 +1366,7 @@ impl BenchmarkParameters {
             crrspndents,
             progress_sender.unwrap(),
             shared_running_flag,
+            None,
             None,
         )
         .await;

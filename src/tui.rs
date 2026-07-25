@@ -7,13 +7,14 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
     style::{Style, Stylize},
-    text::Line,
+    text::{Line, Text},
     widgets::{Block, Gauge, Paragraph, Row, Table},
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Duration;
 
 use crate::benchmark::{BenchmarkResults, ProgressUpdate};
+use crate::extract::TokenGenerationStats;
 
 #[derive(Debug, Clone)]
 enum BenchmarkState {
@@ -28,6 +29,7 @@ struct BenchmarkRunData {
     result: Option<BenchmarkResults>,
     finished_docs: usize,
     total_docs: usize,
+    latest_token_stats: Option<TokenGenerationStats>,
 }
 
 impl BenchmarkRunData {
@@ -37,6 +39,7 @@ impl BenchmarkRunData {
             result: None,
             finished_docs: 0,
             total_docs,
+            latest_token_stats: None,
         }
     }
 }
@@ -103,6 +106,15 @@ impl BenchmarkApp {
                         benchmark_data.result = Some(results.clone())
                     }
                 }
+                ProgressUpdate::TokenStats {
+                    model_name,
+                    doc_token_stats,
+                } => {
+                    let mut progress_data = self.benchmark_progress.write().await;
+                    if let Some(benchmark_data) = progress_data.get_mut(model_name) {
+                        benchmark_data.latest_token_stats = Some(doc_token_stats.clone());
+                    }
+                }
                 _ => { /* nothing to do here */ }
             }
             let mut log_messages = self.log_messages.write().await;
@@ -146,9 +158,10 @@ impl BenchmarkApp {
         let [title_area, content_area] = vertical.areas(frame.area());
         let horizontal = Layout::horizontal([Fill(1); 2]);
         let [info_area, log_area] = horizontal.areas(content_area);
-        let benchmark_size: u16 = ((benchmark_state.keys().len()) * 3 + 2) as u16;
-        let infos = Layout::vertical([Length(benchmark_size), Min(0)]);
-        let [progress_area, result_area] = infos.areas(info_area);
+        let benchmark_size: u16 = ((benchmark_state.keys().len()) * 1 + 3) as u16;
+        let token_perf_size: u16 = (benchmark_state.keys().len() * 1 + 2) as u16;
+        let infos = Layout::vertical([Length(benchmark_size), Length(token_perf_size), Min(0)]);
+        let [progress_area, token_perf_area, result_area] = infos.areas(info_area);
         frame.render_widget(
             Paragraph::new(text)
                 .block(Block::bordered().title(title))
@@ -157,6 +170,7 @@ impl BenchmarkApp {
         );
         render_logs(frame, log_messages, log_area);
         render_progess_bars(frame, benchmark_state, progress_area);
+        render_token_performance(frame, benchmark_state, token_perf_area);
         render_results(frame, benchmark_state, result_area);
     }
 
@@ -225,6 +239,9 @@ fn render_logs(frame: &mut Frame, logs: &Vec<ProgressUpdate>, area: Rect) {
             ProgressUpdate::Error { model_name, .. } => {
                 Line::raw(format!("Error for {model_name}")).style(Style::new().red())
             }
+            ProgressUpdate::TokenStats { model_name, .. } => {
+                Line::raw(format!("Token stats for {model_name}")).style(Style::new().yellow())
+            }
             ProgressUpdate::Finished { model_name } => {
                 Line::raw(format!("Benchmark finihed {model_name}")).style(Style::new().cyan())
             }
@@ -269,6 +286,40 @@ fn render_results(
     frame.render_widget(table, result_inner);
 }
 
+fn render_token_performance(
+    frame: &mut Frame,
+    benchmark_state: &BTreeMap<String, BenchmarkRunData>,
+    area: Rect,
+) {
+    let token_block = Block::bordered().title("Token Performance (t/s)");
+    let token_inner = token_block.inner(area);
+    let mut rows = vec![];
+    for (model_name, data) in benchmark_state.iter() {
+        if let Some(stats) = &data.latest_token_stats {
+            rows.push(Row::new(vec![
+                model_name.clone(),
+                format!("{:.1}", stats.prompt_tps()),
+                format!("{:.1}", stats.injected_tps()),
+                format!("{:.1}", stats.sampled_tps()),
+                format!("{:.1}", stats.overall_tps()),
+            ]));
+        }
+    }
+    let widths = [
+        Constraint::Fill(3),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+    ];
+    let table = Table::new(rows, widths).header(Row::new(vec![
+        "Model", "Prompt", "Inject", "Sample", "Overall",
+    ]));
+
+    frame.render_widget(&token_block, area);
+    frame.render_widget(table, token_inner);
+}
+
 fn render_progess_bars(
     frame: &mut Frame,
     benchmark_state: &BTreeMap<String, BenchmarkRunData>,
@@ -282,28 +333,33 @@ fn render_progess_bars(
     } else {
         1
     };
+    let bar_title_gauge_split = Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]);
+    let [title_area, gauge_area] = bar_title_gauge_split.areas(progress_inner);
     let bar_layout =
-        Layout::vertical(vec![Length(2); amount_bars]).flex(ratatui::layout::Flex::Center);
-    let bar_areas = bar_layout.split(progress_inner);
+        Layout::vertical(vec![Length(1); amount_bars]).flex(ratatui::layout::Flex::Center);
+    let bar_areas = bar_layout.split(gauge_area);
+    let title_layout =
+        Layout::vertical(vec![Length(1); amount_bars]).flex(ratatui::layout::Flex::Center);
+    let title_areas = title_layout.split(title_area);
     frame.render_widget(progress_block, area);
     if benchmark_state.keys().len() > 1 {
         let total_docs: usize = benchmark_state.values().map(|d| d.total_docs).sum();
         let finished_docs: usize = benchmark_state.values().map(|d| d.finished_docs).sum();
         frame.render_widget(
             Gauge::default()
-                .block(Block::new().title("Overall"))
                 .label(format!(" {}/{}", finished_docs, total_docs))
                 .ratio(finished_docs as f64 / total_docs as f64),
             bar_areas[0],
         );
-        for ((model_name, data), area) in zip(benchmark_state.iter(), bar_areas[1..].iter()) {
+        frame.render_widget(Text::raw("Overall"), title_areas[0]);
+        for (((model_name, data), area), text_area) in zip(benchmark_state.iter(), bar_areas[1..].iter()).zip(title_areas[1..].iter()) {
             frame.render_widget(
                 Gauge::default()
-                    .block(Block::new().title(model_name.as_str()))
                     .label(format!(" {}/{}", data.finished_docs, data.total_docs))
                     .ratio(data.finished_docs as f64 / data.total_docs as f64),
                 *area,
             );
+            frame.render_widget(Text::raw(format!("{}", model_name.as_str())), *text_area);
         }
     } else {
         for ((model_name, data), area) in zip(benchmark_state.iter(), bar_areas.iter()) {
