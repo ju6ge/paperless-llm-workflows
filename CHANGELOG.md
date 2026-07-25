@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - updated token sampling and context management to be grammar aware and only let the model generate non deterministic parts of the output
 - updated benchmarking to track token generation performance statistics
 - add script to evalute token generation stats and compare models
+- optimized llama.cpp sampling chain for backend acceleration -> more tokens per second
 
 ### Fixed
 - fixed bug that prevented benchmark continuation for unfinished models
