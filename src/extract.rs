@@ -11,6 +11,7 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::token::data::LlamaTokenData;
 use llama_cpp_2::token::data_array::LlamaTokenDataArray;
+use llama_cpp_2::token::logit_bias::LlamaLogitBias;
 use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -317,9 +318,18 @@ impl LLModelExtractor {
             .map(|s| std::cmp::min(s, model.n_ctx_train()))
             .unwrap_or(model.n_ctx_train());
 
+        let threads = std::thread::available_parallelism()
+            .map(|p| p.get() as u32)
+            .unwrap_or(4);
+
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(NonZeroU32::new(ctx_size).unwrap()))
-            .with_n_batch(ctx_size);
+            .with_n_threads(threads as i32)
+            .with_n_threads_batch(threads as i32)
+            .with_type_k(llama_cpp_2::context::params::KvCacheType::F16)
+            .with_type_v(llama_cpp_2::context::params::KvCacheType::F16)
+            .with_n_batch(2048)
+            .with_n_ubatch(512);
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let eos_string = &model
@@ -346,18 +356,52 @@ impl LLModelExtractor {
         stats_tx: Option<std::sync::mpsc::SyncSender<TokenGenerationStats>>,
     ) -> Result<Value, ModelError> {
         let grammar = gen_gbnf(response_schema, self.eos_string.to_string());
+
+        let json_str_term_tokens = (0..self.model.n_vocab())
+            .filter_map(|t| {
+                let mut decoder = encoding_rs::UTF_8.new_decoder();
+                if let Ok(s) = self
+                    .model
+                    .token_to_piece(LlamaToken(t), &mut decoder, true, None)
+                {
+                    if s.trim().ends_with("\"") && !s.contains("\\") {
+                        Some(LlamaToken(t))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let json_term_token_biases = json_str_term_tokens
+            .iter()
+            .map(|t| {
+                LlamaLogitBias::new(*t, 1.5) 
+            })
+            .collect::<Vec<_>>();
+
         let mut grammar_sampler = LlamaSampler::grammar(&self.model, &grammar, "root").unwrap();
-        let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::grammar(&self.model, &grammar, "root").unwrap(),
-            LlamaSampler::dry(&self.model, 5., 1.75, 2, 256, ["\"", ":", "*"]),
+        let gpu_filter_sampler = LlamaSampler::chain_simple([
+            LlamaSampler::logit_bias(self.model.n_vocab(), &json_term_token_biases),
             LlamaSampler::min_p(0.01, 64),
-            LlamaSampler::temp(0.1),
-            LlamaSampler::dist(rand::random()),
         ]);
+        let mut cpu_final_select = LlamaSampler::chain_simple([
+            LlamaSampler::dry(&self.model, 2.5, 1.75, 2, -1, ["\"", ":", "\n", "{", "}"]),
+            LlamaSampler::temp(0.075),
+            LlamaSampler::dist(rand::random()),
+            //LlamaSampler::greedy(),
+        ]);
+
         let prompt = format!("{}\n", serde_json::to_string(base_data).unwrap());
         let mut ctx = self
             .model
-            .new_context(&self.backend, self.ctx_params.clone())
+            .new_context_with_samplers(
+                &self.backend,
+                self.ctx_params.clone(),
+                [(0, gpu_filter_sampler)],
+            )
             .expect("unable to create the llama_context");
         let tokens_list = self
             .model
@@ -391,7 +435,7 @@ impl LLModelExtractor {
 
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut n_cur = tokens_list.len() as i32;
-        let mut output = String::new();
+        let mut output = String::with_capacity(4096);
         let mut injected_tokens = 0u64;
         let mut injected_elapsed_ms = 0.0f64;
         let mut sampled_tokens = 0u64;
@@ -417,7 +461,6 @@ impl LLModelExtractor {
                 &self.model,
             ) {
                 grammar_sampler.accept(injected);
-                sampler.accept(injected);
                 injected_tokens += 1;
                 injected_elapsed_ms += inject_start.elapsed().as_secs_f64() * 1_000.0;
 
@@ -440,6 +483,7 @@ impl LLModelExtractor {
                     last_inject_substring = Some(output_string)
                 }
             } else {
+                // Decode batched deterministic tokens to advance context
                 if let Some(last_inject_substring) = last_inject_substring.take() {
                     let tokens_list = self
                         .model
@@ -463,16 +507,29 @@ impl LLModelExtractor {
                     }
                     batch.clear();
                 }
-
                 // Check EOS from last decode
                 if output.ends_with(&self.eos_string) {
                     break;
                 }
-
                 // Sample a non-deterministic token
                 let sample_start = Instant::now();
-                let token = sampler.sample(&ctx, batch.n_tokens() - 1);
-                grammar_sampler.accept(token);
+
+                // copy gpu generated logits before first sampling avoid possible double app of dry …
+                let mut token_data_array = ctx.token_data_array();
+
+                let mut token = cpu_final_select.sample(&mut ctx, -1);
+
+                let mut check_token =
+                    LlamaTokenDataArray::new(vec![LlamaTokenData::new(token, 0., 0.)], true);
+                grammar_sampler.apply(&mut check_token);
+
+                if !check_token.data[0].logit().is_infinite() {
+                    grammar_sampler.accept(token);
+                } else {
+                    grammar_sampler.apply(&mut token_data_array);
+                    token = token_data_array.sample_token_greedy();
+                    grammar_sampler.accept(token);
+                }
                 sampled_tokens += 1;
                 sampled_elapsed_ms += sample_start.elapsed().as_secs_f64() * 1_000.0;
 
