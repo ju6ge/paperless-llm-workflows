@@ -1,138 +1,68 @@
-# API Reference
+# API Overview
 
-Browse the interactive API documentation at `http://{server}:8123/api/` after starting the service, or view the [static ReDoc preview](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-llm-workflows/refs/heads/master/openapi.json).
+The full, auto-generated API documentation is available at `http://{server}:8123/api/` after starting the service (powered by the [OpenAPI spec](openapi.json)). View the [static ReDoc preview](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-llm-workflows/refs/heads/master/openapi.json) online.
 
-All endpoints accept POST requests with JSON bodies. The `document_url` field is always required and should be the full API URL of the document in your paperless-ngx instance (e.g., `https://paperless.example.com/api/documents/42/`).
+This page covers how the API works conceptually — the processing model, request contracts, and error handling.
 
-## Endpoints
+## Async Processing Model
 
-### POST /fill/custom_fields
+Every endpoint is **asynchronous**. When you send a POST request:
 
-Auto-fill all empty custom fields on a document.
+1. The request is validated and the document is queued for processing
+2. The service responds with `202 Accepted` immediately
+3. The document receives a `processing` tag
+4. The LLM processes the document in the background
+5. Results are written back to paperless-ngx via its API
+6. The tag is swapped to `finished` (or the custom `next_tag`)
 
-**Request body**:
+You do not need to poll for results — the document is updated directly in paperless-ngx.
+
+## The `document_url` Contract
+
+Every request must include a `document_url` field containing the full API URL of the document in your paperless-ngx instance, for example:
+
+```
+https://paperless.example.com/api/documents/42/
+```
+
+The host portion of this URL **must** match the `PAPERLESS_SERVER` configuration value. This is a security check to prevent external servers from triggering workflows against your instance. Mismatches return `401 Unauthorized`.
+
+The document ID is extracted from the URL path — malformed URLs will be rejected.
+
+## The `next_tag` Parameter
+
+All endpoints accept an optional `next_tag` field. When set, the specified tag (by name or numeric ID) is applied to the document after processing completes, instead of the default `finished` tag. This enables chaining multiple workflow steps:
+
 ```json
 {
   "document_url": "https://paperless.example.com/api/documents/42/",
-  "ignore_custom_fields": [3, "InvoiceNumber"],
-  "next_tag": "fields-filled"
+  "next_tag": "needs-review"
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_url` | string | Yes | paperless API URL of the document |
-| `ignore_custom_fields` | array | No | Custom field IDs (int) or names (string) to skip |
-| `next_tag` | string | No | Tag name or ID to apply after processing |
+After LLM processing, the document receives the `needs-review` tag, which can trigger a second workflow in paperless-ngx.
 
----
+## Error Handling
 
-### POST /fill/target_custom_field
+| Status | Meaning |
+|---|---|
+| `400` | Bad request — missing required fields, invalid document URL, unknown tag, or decision request without any tags |
+| `401` | Security check failed — the `document_url` host does not match the configured `PAPERLESS_SERVER` |
 
-Fill a single custom field by ID.
+Error responses include a descriptive error name (e.g., `DocumentDoesNotExist`, `TagNotFound`, `RequestWithoutEffect`) in the response body.
 
-**Request body**:
-```json
-{
-  "document_url": "https://paperless.example.com/api/documents/42/",
-  "custom_field_id": 5,
-  "prompt": "Extract the contract expiry date.",
-  "next_tag": "updated"
-}
-```
+## Request Format
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_url` | string | Yes | paperless API URL of the document |
-| `custom_field_id` | integer | Yes | ID of the custom field to fill |
-| `prompt` | string | No | Additional context for the LLM |
-| `longtext_schema` | object | No | JSON schema for large text fields |
-| `next_tag` | string | No | Tag name or ID to apply after processing |
+All endpoints accept POST with `application/json` content type. The request body is a JSON object with endpoint-specific parameters plus the universal `document_url` and optional `next_tag` fields.
 
----
+## Available Endpoints
 
-### POST /suggest/correspondent
+| Endpoint | Purpose |
+|---|---|
+| `POST /fill/custom_fields` | Auto-fill all empty custom fields on a document |
+| `POST /fill/target_custom_field` | Fill a specific custom field by ID |
+| `POST /suggest/correspondent` | Suggest the correct correspondent via LLM reasoning |
+| `POST /suggest/title` | Generate a document title (with optional template) |
+| `POST /decision` | Ask a yes/no question and conditionally assign tags |
 
-Suggest a correspondent using LLM reasoning.
-
-**Request body**:
-```json
-{
-  "document_url": "https://paperless.example.com/api/documents/42/",
-  "next_tag": "correspondent-set"
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_url` | string | Yes | paperless API URL of the document |
-| `next_tag` | string | No | Tag name or ID to apply after processing |
-
----
-
-### POST /suggest/title
-
-Generate a document title.
-
-**Request body**:
-```json
-{
-  "document_url": "https://paperless.example.com/api/documents/42/",
-  "template": "{{correspondent}} - {{date}} - {{subject}}",
-  "next_tag": "titled"
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_url` | string | Yes | paperless API URL of the document |
-| `template` | string | No | Jinja-style title template |
-| `next_tag` | string | No | Tag name or ID to apply after processing |
-
----
-
-### POST /decision
-
-Ask a yes/no question about the document and conditionally assign tags.
-
-**Request body**:
-```json
-{
-  "document_url": "https://paperless.example.com/api/documents/42/",
-  "question": "Does this document contain a payment request?",
-  "true_tag": "payment-request",
-  "false_tag": "informational"
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `document_url` | string | Yes | paperless API URL of the document |
-| `question` | string | Yes | Yes/no question about the document |
-| `true_tag` | string | No* | Tag to apply if answer is yes |
-| `false_tag` | string | No* | Tag to apply if answer is no |
-
-> At least one of `true_tag` or `false_tag` must be provided.
-
----
-
-## Common Request Field
-
-| Field | Type | Description |
-|---|---|---|
-| `next_tag` | string (optional) | Accepts a tag name (string) or tag ID (integer as string). Applied to the document after processing completes, replacing the default `finished` tag. |
-
-## Responses
-
-All endpoints return `202 Accepted` on success. Processing is asynchronous — the document is queued and results are applied after LLM inference completes.
-
-## Error Codes
-
-| Status | Error | Description |
-|---|---|---|
-| 400 | `DocumentDoesNotExist` | The document ID from `document_url` was not found |
-| 400 | `InvalidDocumentId` | The `document_url` does not contain a valid integer document ID |
-| 400 | `DocumentUrlParsingIDFailed` | Could not parse a document ID from the `document_url` path |
-| 400 | `TagNotFound` | A referenced tag (`true_tag`, `false_tag`, `next_tag`) doesn't exist |
-| 400 | `RequestWithoutEffect` | No tags specified for `/decision` — the result would have no effect |
-| 401 | `ReceivedRequestFromUnconfiguredServer` | The `document_url` host doesn't match the configured `PAPERLESS_SERVER` |
+For parameter details, request schemas, and examples per endpoint, refer to the [auto-generated API documentation](http://{server}:8123/api/).
