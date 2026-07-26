@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [ 0.5.0 - 2026-07-27]
+
 ### Added
 - added api endpoint to for targeted custom field filling #17
 - added a way to automatically configure workflows for all supported custom fields, need to be enabled by user explicitly #20

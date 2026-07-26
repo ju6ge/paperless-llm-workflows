@@ -61,7 +61,7 @@ networks:
 | Tag | Description |
 |---|---|
 | `latest-vulkan` | Latest release, Vulkan backend |
-| `v0.4.0-vulkan` | Specific version, Vulkan backend |
+| `0.5.0-vulkan` | Specific version, Vulkan backend |
 
 ---
 
