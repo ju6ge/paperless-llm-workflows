@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Changed default model shipped with paperless-llm-workflow to gemma-4-e4b (best performing model with token injection and llama.cpp with proper gemma support)
+- updated README and created dedicated docs for different topics
 
 ### Fixed
 - fixed bug that prevented benchmark continuation for unfinished models
