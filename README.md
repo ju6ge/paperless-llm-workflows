@@ -31,7 +31,7 @@ This project spawns an API server that integrates into `paperless` workflow feat
 
 After starting the service you can navigate to `http://{paperless-llm-workflows.ip}:8123/api/` to get an up to date API documentation describing all the endpoints.
 
-If you wish to inspect the documentation online here is a [preview link](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-field-extractor/refs/heads/master/openapi.json).
+If you wish to inspect the documentation online here is a [preview link](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-llm-workflows/refs/heads/master/openapi.json).
 
 To integrate a functionality into paperless you need to add it as webhook trigger in your paperless workflows:
 
@@ -108,7 +108,7 @@ The default container is setup to include a model already and with some environm
 <podman/docker> run -it --rm \
     --device /dev/kfd \ # give graphics device access to the container
     --device /dev/dri \ # give graphics device access to the container
-    -p 8123:8123
+    -p 8123:8123 \
     -e PAPERLESS_LLM_MAX_CTX=16384 \ # maximum context length of an inference session, needs to be big enought for document + llm output
     -e PAPERLESS_API_CLIENT_API_TOKEN=<token> \
     -e PAPERLESS_SERVER=<paperless_ngx_url> \
