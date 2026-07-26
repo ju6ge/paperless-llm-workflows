@@ -115,131 +115,14 @@ For detailed configuration examples and advanced setups, see the [Configuration 
 
 For detailed deployment instructions (Docker run, docker-compose, building custom containers, bare metal, GPU setup) see the [Deployment Guide](docs/deployment.md).
 
-# Benchmarking
+# Additional Resources
 
-This project includes a comprehensive benchmarking system to evaluate and compare language models for document processing tasks. The benchmarking feature serves two main purposes:
+- [Benchmarking](docs/benchmarking.md) — Evaluate and compare LLM models against your documents
+- [Building from Source](docs/building-from-source.md) — Compile with custom backends and features
+- [Configuration Reference](docs/configuration.md) — Full option reference with defaults
+- [Deployment Guide](docs/deployment.md) — Docker, compose, bare metal, GPU setup
+- [Workflow Guide](docs/workflow-guide.md) — Step-by-step webhook setup in paperless-ngx
 
-1. **Model Comparison**: Evaluate and compare different models based on their success rates for common document processing tasks
-2. **Code Quality Assurance**: Provide a measurable way to assess whether code changes improve or degrade model performance across different models
+## License
 
-Benchmarking code paths are not shipped with the container, instead local building of the code with feature flag `benchmark` is required.
-
-## Benchmarking Feature
-
-The benchmarking system tests models on real documents from your paperless instance, evaluating their performance on:
-- Custom field extraction
-- Correspondent suggestion
-- Decision-making based on document content
-
-Results are displayed in a real-time TUI interface and can are saved to JSON files for further analysis.
-
-## Running Benchmarks
-
-### Prerequisites
-
-To run benchmarks, you need:
-- A working paperless-ngx instance
-- Documents with verified metadata (tags, custom fields, correspondents)
-- Appropriate API token configured
-
-### Single Model Benchmarking
-
-Run benchmarks on a single model:
-
-```sh
-./paperless-llm-workflows benchmark \
-    --paperless-server https://your-paperless.instance \
-    --model /path/to/your/model.gguf \
-    --verified-docs-tag "verified" \
-    --result-file results.json
-```
-
-Options:
-- `--verified-docs-tag`: Only benchmark documents with this tag (recommended for reliable results)
-- `--sample-doc-size`: Limit to N documents (default: all verified documents)
-- `--result-file`: Save results to JSON file
-- `--view`: Display previously saved results
-
-### Multi-Model Benchmarking
-
-Compare multiple models in parallel:
-
-```sh
-./paperless-llm-workflows multi-benchmark \
-    --paperless-server https://your-paperless.instance \
-    --model-directory /path/to/models/ \
-    --output-directory /path/to/results/ \
-    --verified-docs-tag "verified" \
-    --jobs 4
-```
-
-This will:
-1. Find all `.gguf` files in the model directory
-2. Run benchmarks on each model in parallel (up to `--jobs` concurrent)
-3. Save individual results for each model
-4. Display a summary comparison
-
-## Benchmarking Results
-
-### Viewing Results
-
-Results are displayed in a real-time TUI interface showing:
-- Progress bars for each model
-- Overall progress across all models
-- Success/failure/error counts
-- Success rates by benchmark type
-
-To view saved results:
-
-```sh
-./paperless-llm-workflows benchmark --view --result-file results.json
-```
-
-### Result Format
-
-Results are saved in JSON format with:
-- Model name
-- Document ID
-- Expected result
-- Actual benchmark result
-- Success/failure status
-- Error messages (if any)
-
-### Interpreting Results
-
-The benchmark tracks three metrics:
-- **Success**: Model produced the correct answer
-- **Failed**: Model produced an incorrect answer
-- **Errored**: Model encountered an error during processing
-
-Success rates are calculated per benchmark type:
-- Custom field extraction
-- Correspondent suggestion
-- Decision making (valid correspondent)
-- Decision making (invalid correspondent)
-
-## Benchmarking Workflows
-
-The benchmarking system evaluates models on three types of tasks:
-
-### 1. Custom Field Extraction
-Tests the model's ability to extract and fill custom fields from document content. The model must match the exact value that was previously verified for the document.
-
-### 2. Correspondent Suggestion
-Tests the model's ability to suggest the correct correspondent (author/sender) based on document content. The model's suggestion is compared against the verified correspondent.
-
-### 3. Decision Making
-Tests the model's reasoning capabilities with true/false questions:
-- "Is [verified correspondent] the author/sender of this document?" (should answer true)
-- "Is [random other correspondent] the author/sender of this document?" (should answer false)
-
-These benchmarks help ensure models can reliably process documents and make correct decisions based on their content.
-
-# Future Work
-
-Depending on interesent and request the following future updates may come:
-- Automated Finetuning using LoRa on existing corpus of documents
-
-# LICENSE
-
-This software is licensed under the AGPL-3.0
+AGPL-3.0
