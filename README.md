@@ -44,6 +44,31 @@ Each endpoint is triggered from a paperless-ngx workflow via webhook. When a web
 
 See the [Workflow Guide](docs/workflow-guide.md) for step-by-step setup instructions.
 
+## Quick Start
+
+Add to your `docker-compose.yml` alongside paperless-ngx:
+
+```yaml
+services:
+  paperless-llm-workflows:
+    image: ghcr.io/ju6ge/paperless-llm-workflows:latest-vulkan
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    environment:
+      - PAPERLESS_SERVER=https://your-paperless.domain
+      - PAPERLESS_API_CLIENT_API_TOKEN=your-token-here
+      - PAPERLESS_USER=admin
+      - PAPERLESS_LLM_MAX_CTX=16384
+    devices:
+      - /dev/dri
+    # For AMD GPUs with KFD:
+    # - /dev/kfd
+```
+
+Then create webhook workflows in paperless-ngx pointing to `http://paperless-llm-workflows:8123/{endpoint}`.
+
+For full deployment options (GPU variants, custom containers, bare metal) see the [Deployment Guide](docs/deployment.md).
 
 # Configuration
 
