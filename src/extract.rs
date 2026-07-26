@@ -568,6 +568,9 @@ impl LLModelExtractor {
             "extraction stats: forward_passes={} injected={} sampled={}",
             forward_passes, injected_tokens, sampled_tokens
         );
+        log::debug!(
+            "{output}"
+        );
 
         // Send cumulative stats update after each sampled token
         if let Some(ref tx) = stats_tx {
