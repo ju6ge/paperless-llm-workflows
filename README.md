@@ -70,6 +70,21 @@ Then create webhook workflows in paperless-ngx pointing to `http://paperless-llm
 
 For full deployment options (GPU variants, custom containers, bare metal) see the [Deployment Guide](docs/deployment.md).
 
+## Supported Custom Field Types
+
+| Type | Supported | Notes |
+|---|---|---|
+| Boolean | ✅ | Yes/no fields extracted from document content |
+| Date | ✅ | Parses dates with format guidance |
+| Integer | ✅ | Numeric whole numbers |
+| Number | ✅ | Decimal numbers |
+| Monetary | ✅ | Currency values (2 decimal places) |
+| Text | ✅ | Up to 128 characters |
+| Select | ✅ | Chooses from predefined options |
+| LargeText | ✅ | Long-form text; supports JSON schema for structured output |
+| Document Link | ❌ | Requires cross-document resolution |
+| URL | ❌ | Not yet implemented |
+
 # Configuration
 
 Configuration of the software is possible via a configuration file at `/etc/paperless-field-extractor/config.toml` or via environment variables. Environment variables can be used to overwrite values from the configuration file.
