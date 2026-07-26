@@ -111,63 +111,9 @@ The `PAPERLESS_API_CLIENT_API_TOKEN` environment variable (not a config option) 
 
 For detailed configuration examples and advanced setups, see the [Configuration Reference](docs/configuration.md).
 
-# Setup
+# Deployment
 
-If you just want to run this software for your own instance using a containerized approach is recommended. 
-
-## Containerized Approach
-
-The default container is setup to include a model already and with some environment variables should be fully functional:
-
-``` sh
-<podman/docker> run -it --rm \
-    --device /dev/kfd \ # give graphics device access to the container
-    --device /dev/dri \ # give graphics device access to the container
-    -p 8123:8123 \
-    -e PAPERLESS_LLM_MAX_CTX=16384 \ # maximum context length of an inference session, needs to be big enought for document + llm output
-    -e PAPERLESS_API_CLIENT_API_TOKEN=<token> \
-    -e PAPERLESS_SERVER=<paperless_ngx_url> \
-    -e PAPERLESS_USER=<user> \ # used for tag creation
-    ghcr.io/ju6ge/paperless-llm-workflows:<version>-<backend> server
-```
-
-Currently, only the `vulkan` backend has a prebuilt container available, it should be fine for most deployments even without a graphics processor available.
-
-
-## Building the Container yourself
-
-You can also build the container locally if you prefer. For this the following command will do the trick:
-
-``` sh
-<podman/docker> build \
-    -f distribution/docker/Dockerfile \
-    -t localhost/paperless-llm-workflows:vulkan \
-    --build-arg INFERENCE_BACKEND=<backend> \  #this argument is required to select the compute backend, cuda is currenly not supported by the docker build 
-    --build-arg MODEL_URL=<url> \  #optionaly you can point the build process to include a different gguf model by providing a download url
-    --build-arg MODEL_LICENSE_URL=<url> \  #if you change the model, consider including its license in the container build 
-    .
-```
-
-# Build from Source
-
-For development or advanced users manual compilation and setup may be desired.
-
-Successfully building requires selecting a compute backend via feature flag:
-
-``` sh
-cargo build --release -F <backend>
-```
-
-You can select from the following backends:
-- cuda (dedicated GPU - nvidia only)
-- vulkan (CPU integrated GPU + dedicated GPU)
-- rocm (dedicated GPU - amd only + Ryzen AI Max Processors)
-- openmp (CPU)
-
-Depending on your selection you will need to have the corresponding system libraries installed on your device, with development headers included.
-
-Afterward building you can setup a config file at `/etc/paperless-field-extractor/config.toml` and run the software. 
-You will need to download a model gguf yourself and configure the `GGUF_MODEL_PATH` environment variable or `model` config option to point to its location!
+For detailed deployment instructions (Docker run, docker-compose, building custom containers, bare metal, GPU setup) see the [Deployment Guide](docs/deployment.md).
 
 # Benchmarking
 
