@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add script to evalute token generation stats and compare models
 - optimized llama.cpp sampling chain for backend acceleration -> more tokens per second
 
+### Changed
+- Changed default model shipped with paperless-llm-workflow to gemma-4-e4b (best performing model with token injection and llama.cpp with proper gemma support)
+
 ### Fixed
 - fixed bug that prevented benchmark continuation for unfinished models
 
