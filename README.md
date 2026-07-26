@@ -87,49 +87,29 @@ For full deployment options (GPU variants, custom containers, bare metal) see th
 
 # Configuration
 
-Configuration of the software is possible via a configuration file at `/etc/paperless-field-extractor/config.toml` or via environment variables. Environment variables can be used to overwrite values from the configuration file.
+Configuration is applied in layered priority (lowest to highest): TOML config file at `/etc/paperless-field-extractor/config.toml`, environment variables, then CLI flags.
 
-Apart from configuration an API Token is required to enable communication with the paperless API! This token should be made available via the `PAPERLESS_API_CLIENT_API_TOKEN` environment variable!!!
+| Option | Env Variable | Default | Description |
+|---|---|---|---|
+| `host` | `PAPERLESS_WEBHOOK_HOST` | `0.0.0.0` | Listen address |
+| `port` | `PAPERLESS_WEBHOOK_PORT` | `8123` | Listen port |
+| `paperless_server` | `PAPERLESS_SERVER` | — | Your paperless-ngx URL (required) |
+| `webhook_public_base_url` | `WEBHOOK_PULIC_HOST` | — | Public URL for auto-setup of workflows |
+| `model` | `GGUF_MODEL_PATH` | — | Path to GGUF model file (required) |
+| `num_gpu_layers` | `NUM_GPU_LAYERS` | `1024` | GPU layers for offloading (0 = all) |
+| `max_ctx` | `PAPERLESS_LLM_MAX_CTX` | `0` | Max context tokens (0 = model default) |
+| `processing_tag` | `PROCESSING_TAG_NAME` | `🧠 processing` | Tag applied during processing |
+| `processing_color` | `PROCESSING_TAG_COLOR` | `#ffe000` | Processing tag color |
+| `finished_tag` | `FINISHED_TAG_NAME` | `🏷️ finished` | Tag applied after successful processing |
+| `finished_color` | `FINSHED_TAG_COLOR` | `#40aebf` | Finished tag color |
+| `error_tag_enable` | `ERROR_TAG_ENABLE` | `false` | Enable error tagging (opt-in) |
+| `error_tag` | `ERROR_TAG_NAME` | `⚠️ error` | Error tag name |
+| `error_color` | `ERROR_TAG_COLOR` | `#e45858` | Error tag color |
+| `tag_user_name` | `PAPERLESS_USER` | `user` | Paperless username for tag creation |
 
-This file shows the default configuration and explains the options:
-``` toml
-# corresponding env var `PAPERLESS_WEBHOOK_HOST` listen address of service
-host = "0.0.0.0"
-# corresponding env var `PAPERLESS_WEBHOOK_PORT` listen port of service
-port = 8123
-# corresponding env var `PAPERLESS_SERVER`, defines were the paperless instnace is reachable
-paperless_server = "https://example-paperless.domain"
-# corresponting env var `WEBHOOK_PUBLIC_BASE_URL`, set reachable public ip of this webserver with this information paperless-llm-workflow can auto setup the required workflows for custom field filling
-webhook_public_base_url = "http(s)://paperless-llm-workflows.host{:optional-port}
-# corresponding env var `GGUF_MODEL_PATH`, defines where the gguf model file is located
-model = "/usr/share/paperless-field-extractor/model.gguf"
-# corresponding env var `NUM_GPU_LAYERS`, sets llama cpp option num_cpu_layers when initializing the inference backend zero here means unlimited, most models have way less layers ~50 so this should suffice for full offloading to gpu
-num_gpu_layers = 1024
-# corresponding env var `PAPERLESS_LLM_MAX_CTX`, sets maximum token size for an inference session if, default value of 0 means that the maximum context used while training of the model will be used. This is potentially very big so it is recommended to use
-a lower value. It needs to be big enouth to fit the biggest doc from your paperless instance.
-max_ctx = 0
+The `PAPERLESS_API_CLIENT_API_TOKEN` environment variable (not a config option) is also required — it authenticates with the paperless-ngx API.
 
-# correspondent suggesting enables the language model to process all inbox documents and add extra suggestions to the correspondet value, this is useful if you have a lot of new document that paperless has not trained for matching yet
-# the corresponding environment var is `CORRESPONDENT_SUGGEST`
-correspondent_suggestions = false
-
-# corresponding env var `PROCESSING_TAG_NAME`, display name of the tag that is show when a document is being processed
-processing_tag = "🧠 processing"
-# corresponding env var `PROCESSING_TAG_COLOR`, display color of the tag that is show when a document is being processed
-processing_color = "#ffe000"
-# corresponding env var `FINISHED_TAG_NAME`, display name of the tag that is show when a document has been fully processed
-finished_tag = "🏷️ finished"
-# corresponding env var `FINISHED_TAG_COLOR`, display color of the tag that is show when a document has been fully processed
-finished_color = "#40aebf"
-# corresponding env var "ERROR_TAG_ENABLE", control if error tags are used
-error_tag_enable = false
-# corresponding env var `ERROR_TAG_NAME`, display name of the tag that is shown when a document processing ran into an error
-error_tag = "⚠️ error"
-# corresponding env var `ERROR_TAG_COLOR`, display color of the tag that is shown when a document processing ran into an error
-error_color = "#e45858"
-# corresponding env var `PAPERLESS_USER`, default user to use when creating processing and finshed tags on inital connection
-tag_user_name = "user"
-```
+For detailed configuration examples and advanced setups, see the [Configuration Reference](docs/configuration.md).
 
 # Setup
 
