@@ -113,7 +113,7 @@ For detailed configuration examples and advanced setups, see the [Configuration 
 
 ## Additional Resources
 
-- [API Reference](docs/api-reference.md) — Endpoints, request/response schemas, error codes
+- [API Overview](docs/api-reference.md) — Async processing model, request contract, error handling — plus [auto-generated OpenAPI docs](openapi.json)
 - [Benchmarking](docs/benchmarking.md) — Evaluate and compare LLM models against your documents
 - [Building from Source](docs/building-from-source.md) — Compile with custom backends and features
 - [Configuration Reference](docs/configuration.md) — Full option reference with defaults
