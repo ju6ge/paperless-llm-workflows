@@ -24,31 +24,25 @@ This project is **not** a chat interface for your documents and does **not** sen
 - **Acceleration backends**: `vulkan`, `cuda`, `rocm`, `openmp` (CPU) — choose one at compile time
 - **Runtime**: model loads on first request, unloads after queue is idle to save memory
 
-# Usage
+## Endpoints
 
-This project spawns an API server that integrates into `paperless` workflow features using webhook and provides custom processing steps.
+| Endpoint | Description |
+|---|---|
+| `POST /fill/custom_fields` | Auto-fill all empty custom fields on a document |
+| `POST /fill/target_custom_field` | Fill a specific custom field by ID (supports custom prompts & JSON schema for longtext) |
+| `POST /suggest/correspondent` | Use LLM reasoning to suggest the correct correspondent |
+| `POST /suggest/title` | Generate a document title (supports Jinja-style templates) |
+| `POST /decision` | Ask a yes/no question about the document and conditionally assign tags |
 
-## LLM Workflows
+Browse the full API documentation at `http://{server}:8123/api/` after starting the service, or view the [static preview online](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-llm-workflows/refs/heads/master/openapi.json).
 
-After starting the service you can navigate to `http://{paperless-llm-workflows.ip}:8123/api/` to get an up to date API documentation describing all the endpoints.
+## How It Works
 
-If you wish to inspect the documentation online here is a [preview link](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/ju6ge/paperless-llm-workflows/refs/heads/master/openapi.json).
+Each endpoint is triggered from a paperless-ngx workflow via webhook. When a webhook fires, the document is placed in a processing queue, gets a `processing` tag, and is sent through the LLM. After completion, results are written back to paperless and the tag is swapped to `finished` (or a custom `next_tag`).
 
-To integrate a functionality into paperless you need to add it as webhook trigger in your paperless workflows:
+![Workflow Sequence](./workflow_api_sequence.svg)
 
-![Paperless Webhook](./example-workflow-action.png)
-
-When a webhook gets triggered the document will be added to the processing queue of `paperless-llm-workflows` with the corresponding action. The document will be given a 
-`processing` tag to make paperless users aware that the document still has pending updates. Once all processing requests for a document have been completed the document will 
-be updated with the results and is given a `finished` tag. If you wish to assign a specific tag on process completion there is an extra parameter to the webhook which you 
-can use to overwrite what tag will be assigned once the processing step has completed. This process is shown in the following sequence diagram.
-
-![LLM Workflow Sequence](./workflow_api_sequence.svg)
-
-As of now the following llm workflows are available:
-- `/fill/custom_fields`: For all supported custom fields data types extract value from document content
-- `/suggest/correspondent`: Suggest document correspondent by using reasoning
-- `/decision`: Ask a true or false question about the document and set tags depending on result
+See the [Workflow Guide](docs/workflow-guide.md) for step-by-step setup instructions.
 
 
 # Configuration
