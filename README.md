@@ -1,7 +1,10 @@
-paperless-llm-workflows
-=========================
+# paperless-llm-workflows
 
-This project is an extension to the excellent [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) software.
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
+[![Rust Build](https://github.com/ju6ge/paperless-llm-workflows/actions/workflows/rust.yml/badge.svg)](https://github.com/ju6ge/paperless-llm-workflows/actions/workflows/rust.yml)
+[![Latest Release](https://img.shields.io/github/v/release/ju6ge/paperless-llm-workflows)](https://github.com/ju6ge/paperless-llm-workflows/releases)
+
+A privacy-first, local LLM extension for [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) that automates document processing through webhook-driven workflows — no cloud providers, no external APIs.
 
 # Who is this project for?
 
