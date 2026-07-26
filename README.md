@@ -85,7 +85,7 @@ For full deployment options (GPU variants, custom containers, bare metal) see th
 | Document Link | ❌ | Requires cross-document resolution |
 | URL | ❌ | Not yet implemented |
 
-# Configuration
+## Configuration
 
 Configuration is applied in layered priority (lowest to highest): TOML config file at `/etc/paperless-field-extractor/config.toml`, environment variables, then CLI flags.
 
@@ -111,16 +111,14 @@ The `PAPERLESS_API_CLIENT_API_TOKEN` environment variable (not a config option) 
 
 For detailed configuration examples and advanced setups, see the [Configuration Reference](docs/configuration.md).
 
-# Deployment
+## Additional Resources
 
-For detailed deployment instructions (Docker run, docker-compose, building custom containers, bare metal, GPU setup) see the [Deployment Guide](docs/deployment.md).
-
-# Additional Resources
-
+- [API Reference](docs/api-reference.md) — Endpoints, request/response schemas, error codes
 - [Benchmarking](docs/benchmarking.md) — Evaluate and compare LLM models against your documents
 - [Building from Source](docs/building-from-source.md) — Compile with custom backends and features
 - [Configuration Reference](docs/configuration.md) — Full option reference with defaults
 - [Deployment Guide](docs/deployment.md) — Docker, compose, bare metal, GPU setup
+- [FAQ & Troubleshooting](docs/faq-troubleshooting.md) — Common issues and solutions
 - [Workflow Guide](docs/workflow-guide.md) — Step-by-step webhook setup in paperless-ngx
 
 ## License
