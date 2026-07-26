@@ -6,13 +6,14 @@
 
 A privacy-first, local LLM extension for [paperless-ngx](https://github.com/paperless-ngx/paperless-ngx) that automates document processing through webhook-driven workflows — no cloud providers, no external APIs.
 
-# Who is this project for?
+## What It Does
 
-This project is for people who want to expand the machine learning capabilities of paperless without sacrificing privacy. The 
-goal is to integrate language model capabilities into paperless seamlessly without yet another chat and prompting interface or 
-complex user interface. This is a standalone project and does not require an extra service to provide model inference everything is baked in already.
+paperless-llm-workflows integrates a local LLM into your paperless-ngx instance as a set of automated workflow steps. Connect it via webhooks in the paperless workflow UI and the LLM will auto-fill custom fields, suggest correspondents, generate document titles, and make conditional decisions on your documents — all processed locally on your hardware.
 
-If you are looking for document chat or don't care and are fine sending all your private documents to the big cloud providers check out these projects:
+## Why Not the Alternatives?
+
+This project is **not** a chat interface for your documents and does **not** send anything to external APIs. If you're looking for cloud-based or chat-oriented solutions, consider:
+
 - [paperless-gpt](https://github.com/icereed/paperless-gpt)
 - [paperless-ai](https://github.com/clusterzx/paperless-ai)
 
