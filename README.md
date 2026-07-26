@@ -17,15 +17,12 @@ This project is **not** a chat interface for your documents and does **not** sen
 - [paperless-gpt](https://github.com/icereed/paperless-gpt)
 - [paperless-ai](https://github.com/clusterzx/paperless-ai)
 
-## Under the Hood
+## Technical Details
 
-Under the hood this software is running `llama.cpp` as an inference engine to provide a local language model without depending on any cloud providers. Depending on the selected feature it is possible to run
-with `cuda`, `vulkan`, `rocm` or `openmp` acceleration.
-
-As a base model this software is using a quantized version of `Gemma-4 E4B` to reduce the resource requirements and enable running this even with limited resources.
-If you are interested in the process of how I evaluate models, you can read my [blog post](https://www.felixrichter.tech/posts/llm-benchmarking/) the results are not up to date with the currently selected model or sampling pipeline, but the process of model evaluation has not changed ;).
-
-Long term I want to expand the features to enable fine-tuning models to your document corpus. This is where the actual learning would come in.
+- **Inference engine**: [llama.cpp](https://github.com/ggerganov/llama.cpp) — fully local, zero external API calls
+- **Default model**: Gemma4 E4B (Q3_0 quantized) — selected for best accuracy-to-resource ratio [blog post, describing method](https://www.felixrichter.tech/posts/llm-benchmarking/)
+- **Acceleration backends**: `vulkan`, `cuda`, `rocm`, `openmp` (CPU) — choose one at compile time
+- **Runtime**: model loads on first request, unloads after queue is idle to save memory
 
 # Usage
 
