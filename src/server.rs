@@ -1,9 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
-    hash::Hash,
-    path::Path,
-    sync::Arc,
-    time::Duration,
+    collections::{BTreeMap, VecDeque}, hash::Hash, num::ParseIntError, path::Path, sync::Arc, time::Duration
 };
 
 use actix_web::{
@@ -394,6 +390,8 @@ enum WebhookError {
     InvalidIgnoreCustomFieldValue,
     #[error("Could not parse Document ID from `document_url` field!")]
     DocumentUrlParsingIDFailed,
+    #[error("Could not parse id field as integer in request body")]
+    ParseIntegerError(#[from] ParseIntError),
     #[error("Document Url points to a server unrelated to this configuration. Ignoring Request")]
     ReceivedRequestFromUnconfiguredServer,
     #[error("Request specified tag {0}, but it could not be found, neither id nor name exists!")]
@@ -433,7 +431,7 @@ struct TargetedCustomFieldFill {
     /// url of the document that should be processed
     document_url: String,
     /// custom field id of the field to fill
-    custom_field_id: i64,
+    custom_field_id: String,
     /// optional prompt to add more information to the context
     prompt: Option<String>,
     /// optional schema for longcontext fields, allow setting json schema for longtext fields to enforce format
@@ -775,6 +773,8 @@ async fn targeted_custom_field_prediction(
         document_url: params.document_url.clone(),
         next_tag: params.next_tag.clone(),
     };
+
+    let custom_field_id: i64 = params.custom_field_id.parse()?;
     generic_webhook_params
         .handle_request(
             status_tags,
@@ -782,7 +782,7 @@ async fn targeted_custom_field_prediction(
             config,
             document_pipeline,
             ProcessingType::TargetedCustomField {
-                custom_field_id: params.custom_field_id,
+                custom_field_id,
                 prompt: params.prompt.clone(),
                 longtext_schema: params.longtext_schema.clone(),
             },
