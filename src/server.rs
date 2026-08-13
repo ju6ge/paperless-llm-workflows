@@ -842,6 +842,7 @@ struct DocumentProcessingApi;
 impl HttpServiceFactory for DocumentProcessingApi {
     fn register(self, config: &mut actix_web::dev::AppService) {
         custom_field_prediction.register(config);
+        targeted_custom_field_prediction.register(config);
         suggest_correspondent.register(config);
         decision.register(config);
         suggest_title.register(config);
