@@ -1258,6 +1258,7 @@ async fn workflow_sync_task(
     processing_tag: Tag,
     webhook_public_base_url: String,
     interval_secs: u64,
+    auto_enable_workflows: bool,
 ) {
     let interval = Duration::from_secs(interval_secs);
     info!(
@@ -1277,6 +1278,7 @@ async fn workflow_sync_task(
             &status_tags,
             &webhook_public_base_url,
             &processing_tag,
+            auto_enable_workflows,
         )
         .await;
 
@@ -1319,6 +1321,7 @@ pub(crate) async fn run_server(
             processing_tag.clone(),
             webhook_url.clone(),
             config.workflow_sync_interval_seconds,
+            config.auto_enable_workflows,
         ))
     } else {
         spawn(async {})

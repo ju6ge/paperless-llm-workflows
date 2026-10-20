@@ -146,6 +146,8 @@ async fn async_main() {
             port: args.port,
             paperless_server: args.paperless_server,
             webhook_public_base_url: args.webhook_public_base_url,
+            auto_enable_workflows: None,
+            workflow_sync_interval_seconds: None,
             model: args.model,
             num_gpu_layers: args.num_gpu_layers,
             max_ctx: args.max_ctx,
@@ -312,6 +314,7 @@ async fn async_main() {
             &status_tags,
             webhook_public_url,
             &processing_tag,
+            config.auto_enable_workflows,
         )
         .await;
     }
