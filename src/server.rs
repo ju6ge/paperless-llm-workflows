@@ -45,7 +45,7 @@ use crate::{
     extract::{LLModelExtractor, ModelError},
     requests,
     types::{
-        Decision, FieldError, FieldExtract, custom_field_learning_supported,
+        Decision, FieldError, FieldExtract, PaperlessStatusTags, custom_field_learning_supported,
         schema_from_decision_question,
     },
 };
@@ -1250,13 +1250,6 @@ async fn document_request_funnel(
     }
 
     *STOP_FLAG.write().await = true;
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PaperlessStatusTags {
-    pub processing: Tag,
-    pub finished: Tag,
-    pub error: Option<Tag>,
 }
 
 pub(crate) async fn run_server(

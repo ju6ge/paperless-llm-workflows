@@ -1,8 +1,14 @@
 use chrono::NaiveDate;
+use itertools::any;
+use log::{error, info};
 use once_cell::sync::Lazy;
-use paperless_api_client::types::{
-    Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, WorkflowActionRequest,
-    WorkflowActionTypeEnum, WorkflowActionWebhookRequest, WorkflowRequest, WorkflowTriggerRequest,
+use paperless_api_client::{
+    Client,
+    types::{
+        Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, Tag, WorkflowActionRequest,
+        WorkflowActionTypeEnum, WorkflowActionWebhookRequest, WorkflowRequest,
+        WorkflowTriggerRequest,
+    },
 };
 use regex::Regex;
 use schemars::{JsonSchema, Schema, json_schema, schema_for};
@@ -10,9 +16,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::server::PaperlessStatusTags;
-
 static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}\}");
+
+#[derive(Debug, Clone)]
+pub(crate) struct PaperlessStatusTags {
+    pub processing: Tag,
+    pub finished: Tag,
+    pub error: Option<Tag>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 /// Structure to extract currency data from a document
@@ -625,5 +636,67 @@ pub(crate) fn create_workflow_from_custom_field(
             remove_change_groups: None,
             email: None,
         }],
+    }
+}
+
+pub(crate) async fn sync_custom_field_workflows(
+    client: &mut Client,
+    status_tags: &PaperlessStatusTags,
+    webhook_public_base_url: &str,
+    processing_tag: &Tag,
+) {
+    let all_supported_custom_fields: Vec<CustomField> =
+        crate::requests::get_all_custom_fields(client)
+            .await
+            .into_iter()
+            .filter(|cf| custom_field_learning_supported(cf))
+            .collect();
+
+    let all_generated_workflows = crate::requests::get_generated_workflow_for_custom_fields(
+        client,
+        &all_supported_custom_fields,
+    )
+    .await;
+
+    if let Some(error_tag) = &status_tags.error {
+        for wf_trigger in all_generated_workflows
+            .iter()
+            .map(|(w, _c)| w.triggers.clone())
+            .flatten()
+        {
+            if wf_trigger
+                .filter_has_not_tags
+                .as_ref()
+                .is_some_and(|ignored_tag_ids| !ignored_tag_ids.contains(&error_tag.id))
+            {
+                crate::requests::update_workflow_trigger_ignore_tags(
+                    client,
+                    &wf_trigger,
+                    &[processing_tag, error_tag],
+                )
+                .await;
+            }
+        }
+    }
+
+    let custom_fields_without_workflow: Vec<&CustomField> = all_supported_custom_fields
+        .iter()
+        .filter(|cf| {
+            !any(all_generated_workflows.iter(), |wf_cf_match| {
+                wf_cf_match.1 == *cf
+            })
+        })
+        .collect();
+
+    for cf in custom_fields_without_workflow {
+        info!("Creating workflow for new custom field: {}", cf.name);
+        let wfr = create_workflow_from_custom_field(
+            cf,
+            status_tags.clone(),
+            &webhook_public_base_url.to_string(),
+        );
+        if let Err(e) = client.workflows().create(&wfr).await {
+            error!("Failed to create workflow for custom field '{}': {}", cf.name, e);
+        }
     }
 }
