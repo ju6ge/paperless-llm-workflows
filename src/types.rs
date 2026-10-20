@@ -1,5 +1,4 @@
 use chrono::NaiveDate;
-use itertools::any;
 use log::{error, info};
 use once_cell::sync::Lazy;
 use paperless_api_client::{
@@ -658,12 +657,13 @@ pub(crate) async fn sync_custom_field_workflows(
     )
     .await;
 
+    let mut all_triggers = Vec::new();
+    for (wf, _cf) in &all_generated_workflows {
+        all_triggers.extend(wf.triggers.clone());
+    }
+
     if let Some(error_tag) = &status_tags.error {
-        for wf_trigger in all_generated_workflows
-            .iter()
-            .map(|(w, _c)| w.triggers.clone())
-            .flatten()
-        {
+        for wf_trigger in all_triggers {
             if wf_trigger
                 .filter_has_not_tags
                 .as_ref()
@@ -679,14 +679,15 @@ pub(crate) async fn sync_custom_field_workflows(
         }
     }
 
-    let custom_fields_without_workflow: Vec<&CustomField> = all_supported_custom_fields
-        .iter()
-        .filter(|cf| {
-            !any(all_generated_workflows.iter(), |wf_cf_match| {
-                wf_cf_match.1 == *cf
-            })
-        })
-        .collect();
+    let mut custom_fields_without_workflow = Vec::new();
+    for cf in &all_supported_custom_fields {
+        let has_workflow = all_generated_workflows
+            .iter()
+            .any(|(_, wf_cf)| *wf_cf == cf);
+        if !has_workflow {
+            custom_fields_without_workflow.push(cf);
+        }
+    }
 
     for cf in custom_fields_without_workflow {
         info!("Creating workflow for new custom field: {}", cf.name);

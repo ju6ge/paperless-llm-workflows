@@ -10,7 +10,7 @@ use actix_web::{
     web::{self, Data},
 };
 use itertools::Itertools;
-use log::error;
+use log::{error, info};
 use once_cell::sync::Lazy;
 use paperless_api_client::{
     Client,
@@ -45,8 +45,8 @@ use crate::{
     extract::{LLModelExtractor, ModelError},
     requests,
     types::{
-        Decision, FieldError, FieldExtract, PaperlessStatusTags, custom_field_learning_supported,
-        schema_from_decision_question,
+        Decision, FieldError, FieldExtract, PaperlessStatusTags, sync_custom_field_workflows,
+        custom_field_learning_supported, schema_from_decision_question,
     },
 };
 
@@ -1252,6 +1252,38 @@ async fn document_request_funnel(
     *STOP_FLAG.write().await = true;
 }
 
+async fn workflow_sync_task(
+    mut api_client: Client,
+    status_tags: PaperlessStatusTags,
+    processing_tag: Tag,
+    webhook_public_base_url: String,
+    interval_secs: u64,
+) {
+    let interval = Duration::from_secs(interval_secs);
+    info!(
+        "Starting workflow sync task with {} second interval",
+        interval_secs
+    );
+
+    loop {
+        if *STOP_FLAG.read().await {
+            info!("Workflow sync task shutting down");
+            break;
+        }
+
+        info!("Running custom field workflow sync");
+        sync_custom_field_workflows(
+            &mut api_client,
+            &status_tags,
+            &webhook_public_base_url,
+            &processing_tag,
+        )
+        .await;
+
+        tokio::time::sleep(interval).await;
+    }
+}
+
 pub(crate) async fn run_server(
     config: Config,
     processing_tag: Tag,
@@ -1263,7 +1295,7 @@ pub(crate) async fn run_server(
     let (tx_update, rx_update) = tokio::sync::mpsc::unbounded_channel();
 
     let status_tags = PaperlessStatusTags {
-        processing: processing_tag,
+        processing: processing_tag.clone(),
         finished: finished_tag,
         error: error_tag,
     };
@@ -1279,6 +1311,19 @@ pub(crate) async fn run_server(
         paperless_api_client.clone(),
         rx_update,
     ));
+
+    let workflow_sync_task = if let Some(ref webhook_url) = config.webhook_public_base_url {
+        spawn(workflow_sync_task(
+            paperless_api_client.clone(),
+            status_tags.clone(),
+            processing_tag.clone(),
+            webhook_url.clone(),
+            3600,
+        ))
+    } else {
+        spawn(async {})
+    };
+
     let server_config = config.clone();
     let webhook_server = HttpServer::new(move || {
         App::new()
@@ -1300,7 +1345,8 @@ pub(crate) async fn run_server(
         webhook_server,
         doc_to_process_queue,
         doc_processor,
-        doc_update_task
+        doc_update_task,
+        workflow_sync_task
     );
 
     Ok(())
