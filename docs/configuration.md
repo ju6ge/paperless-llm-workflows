@@ -27,6 +27,15 @@ These must be provided at runtime (via env, CLI, or config file):
 | `webhook_public_base_url` | `WEBHOOK_PULIC_HOST` | _(none)_ | Public-facing URL of this service. When set, enables automatic workflow creation for custom fields on startup |
 | `max_ctx` | `PAPERLESS_LLM_MAX_CTX` | `0` | Maximum LLM context window in tokens. `0` uses the model's trained maximum. Reduce this to limit memory usage — must be large enough for your largest document plus LLM output |
 
+## Workflow Options
+
+Only active when `webhook_public_base_url` is set.
+
+| Option | Env Variable | Default | Description |
+|---|---|---|---|
+| `workflow_sync_interval_seconds` | `WORKFLOW_SYNC_INTERVAL_SECONDS` | `3600` | Interval in seconds between periodic runs of the workflow sync background task, which keeps auto-generated custom field workflows in sync with paperless |
+| `auto_enable_workflows` | `AUTO_ENABLE_WORKFLOWS` | `false` | Whether auto-generated workflows are enabled immediately. When `false`, workflows are created disabled and must be enabled per field |
+
 ## Model Options
 
 | Option | Env Variable | Default | Description |
@@ -57,6 +66,10 @@ model = "/path/to/model.gguf"
 
 # Optional: enable auto-workflow setup
 webhook_public_base_url = "https://llm-workflows.example.com"
+# Optional: enable auto-generated workflows immediately
+auto_enable_workflows = true
+# Optional: workflow sync interval in seconds
+workflow_sync_interval_seconds = 1800
 
 # Optional: limit context window
 max_ctx = 16384
