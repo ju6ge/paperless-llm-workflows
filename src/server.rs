@@ -1015,19 +1015,12 @@ async fn document_updater(
                         }
                     }
                     ProcessingType::TargetedCustomField {
-                        custom_field_id,
+                        custom_field_id: _,
                         prompt: _,
                         longtext_schema: _,
                     } => {
-                        if let Some(cfis) = doc_req.document.custom_fields.as_ref()
-                            && let Some(target_field_update) =
-                                cfis.iter().find(|cf| cf.field == *custom_field_id)
-                        {
-                            let cf_update_list = updated_cf.get_or_insert_default();
-                            cf_update_list.retain(|cf| cf.field != *custom_field_id);
-                            cf_update_list.push(target_field_update.clone());
-                        } else {
-                            // TODO should something happen if the targeted field was not updated 🤔
+                        if let Some(cfis) = doc_req.document.custom_fields.as_ref() {
+                            updated_cf = Some(cfis.clone());
                         }
                     }
                 }
