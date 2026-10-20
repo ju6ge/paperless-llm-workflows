@@ -65,6 +65,14 @@ struct Args {
     #[clap(long, global = true)]
     webhook_public_base_url: Option<String>,
 
+    /// Automatically enable workflows created for custom field filling
+    #[clap(long, action)]
+    auto_enable_workflows: bool,
+
+    /// Interval in seconds for the periodic workflow sync background task
+    #[clap(long, global = true)]
+    workflow_sync_interval_seconds: Option<u64>,
+
     /// Path to the GGUF model file
     #[clap(long, global = true)]
     model: Option<String>,
@@ -146,8 +154,12 @@ async fn async_main() {
             port: args.port,
             paperless_server: args.paperless_server,
             webhook_public_base_url: args.webhook_public_base_url,
-            auto_enable_workflows: None,
-            workflow_sync_interval_seconds: None,
+            auto_enable_workflows: if args.auto_enable_workflows {
+                Some(true)
+            } else {
+                None
+            },
+            workflow_sync_interval_seconds: args.workflow_sync_interval_seconds,
             model: args.model,
             num_gpu_layers: args.num_gpu_layers,
             max_ctx: args.max_ctx,
