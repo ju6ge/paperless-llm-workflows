@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- fixed bugs with weired paperless API value serialisation and deseralisation
+- fixed targeted custom field endpoint not being enabled
+- fixed bug with targeted custom field filling removing other custom field values
+
 ## [ 0.5.0 - 2026-07-27]
 
 ### Added
