@@ -517,6 +517,7 @@ pub(crate) fn create_workflow_from_custom_field(
     custom_field: &CustomField,
     status_tags: PaperlessStatusTags,
     webhook_base_url: &String,
+    enabled: bool,
 ) -> WorkflowRequest {
     let mut ignore_tags = vec![status_tags.processing.id];
     if let Some(error_tag) = &status_tags.error {
@@ -525,7 +526,7 @@ pub(crate) fn create_workflow_from_custom_field(
     WorkflowRequest {
         name: format!("🧠 Fill Field `{}`", custom_field.name),
         order: Some(1000),
-        enabled: Some(false),
+        enabled: Some(enabled),
         triggers: vec![
             WorkflowTriggerRequest {
                 id: None,
@@ -643,6 +644,7 @@ pub(crate) async fn sync_custom_field_workflows(
     status_tags: &PaperlessStatusTags,
     webhook_public_base_url: &str,
     processing_tag: &Tag,
+    auto_enable_workflows: bool,
 ) {
     let all_supported_custom_fields: Vec<CustomField> =
         crate::requests::get_all_custom_fields(client)
@@ -695,6 +697,7 @@ pub(crate) async fn sync_custom_field_workflows(
             cf,
             status_tags.clone(),
             &webhook_public_base_url.to_string(),
+            auto_enable_workflows,
         );
         if let Err(e) = client.workflows().create(&wfr).await {
             error!("Failed to create workflow for custom field '{}': {}", cf.name, e);
