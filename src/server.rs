@@ -1318,7 +1318,7 @@ pub(crate) async fn run_server(
             status_tags.clone(),
             processing_tag.clone(),
             webhook_url.clone(),
-            3600,
+            config.workflow_sync_interval_seconds,
         ))
     } else {
         spawn(async {})
