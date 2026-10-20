@@ -7,7 +7,7 @@
       "name": "AGPL-3.0",
       "identifier": "AGPL-3.0"
     },
-    "version": "0.3.0"
+    "version": "0.5.1"
   },
   "paths": {
     "/decision": {
@@ -65,13 +65,34 @@
           "llm_workflow_trigger"
         ],
         "summary": "Workflow to fill unfilled custom fields on a document",
-        "description": "Scan document for unfilled custom fields and use llm to predict the values from the document content.\n\n## Supported Custom Field Types\n\nCurrently this projects predicting the following kinds of custom fields:\n- [x] Boolean\n- [x] Date\n- [x] Integer\n- [x] Number\n- [x] Monetary\n- [x] Text\n- [x] Select\n- [ ] Document Link\n- [ ] URL\n- [ ] LargeText",
+        "description": "Scan document for unfilled custom fields and use llm to predict the values from the document content.\n\n## Supported Custom Field Types\n\nCurrently this projects predicting the following kinds of custom fields:\n- [x] Boolean\n- [x] Date\n- [x] Integer\n- [x] Number\n- [x] Monetary\n- [x] Text\n- [x] Select\n- [ ] Document Link\n- [ ] URL\n- [x] LargeText",
         "operationId": "custom_field_prediction",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WebhookParams"
+                "$ref": "#/components/schemas/FillAllCustomFields"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {}
+      }
+    },
+    "/fill/target_custom_field": {
+      "post": {
+        "tags": [
+          "llm_workflow_trigger"
+        ],
+        "summary": "Workflow to fill a specific unfilled custom fields on a document",
+        "description": "## Supported Custom Field Types\n\nCurrently this projects predicting the following kinds of custom fields:\n- [x] Boolean\n- [x] Date\n- [x] Integer\n- [x] Number\n- [x] Monetary\n- [x] Text\n- [x] Select\n- [ ] Document Link\n- [ ] URL\n- [x] LargeText",
+        "operationId": "targeted_custom_field_prediction",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetedCustomFieldFill"
               }
             }
           },
@@ -100,10 +121,141 @@
         },
         "responses": {}
       }
+    },
+    "/suggest/title": {
+      "post": {
+        "tags": [
+          "llm_workflow_trigger"
+        ],
+        "summary": "Workflow to suggest a document title",
+        "description": "Given the document content, use the LLM to generate a title. Optionally a jinja-style template\ncan be provided to control the title format, e.g. `{{correspondent}} - {{date}} - {{subject}}`.\nWhen a template is used, the LLM generates each field individually and the code composes the\nfinal title. Without a template, a single free-form title is generated.",
+        "operationId": "suggest_title",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "document_url"
+                ],
+                "properties": {
+                  "document_url": {
+                    "type": "string",
+                    "description": "url of the document that should be processed"
+                  },
+                  "next_tag": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set"
+                  },
+                  "template": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "optional jinja-style template for title formatting, e.g. \"{{correspondent}} - {{date}} - {{subject}}\". If unspecified, a single free-form title is generated."
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {}
+      }
     }
   },
   "components": {
     "schemas": {
+      "FillAllCustomFields": {
+        "type": "object",
+        "required": [
+          "document_url"
+        ],
+        "properties": {
+          "document_url": {
+            "type": "string",
+            "description": "url of the document that should be processed"
+          },
+          "ignore_custom_fields": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {},
+            "description": "list of custom fields that will be ignored\n\nmust be either an integer referencing the custom field id, or string referencing the custom field name"
+          },
+          "next_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set"
+          }
+        }
+      },
+      "TargetedCustomFieldFill": {
+        "type": "object",
+        "required": [
+          "document_url",
+          "custom_field_id"
+        ],
+        "properties": {
+          "custom_field_id": {
+            "type": "string",
+            "description": "custom field id of the field to fill"
+          },
+          "document_url": {
+            "type": "string",
+            "description": "url of the document that should be processed"
+          },
+          "longtext_schema": {
+            "description": "optional schema for longcontext fields, allow setting json schema for longtext fields to enforce format"
+          },
+          "next_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set"
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "optional prompt to add more information to the context"
+          }
+        }
+      },
+      "TitleSuggestParams": {
+        "type": "object",
+        "required": [
+          "document_url"
+        ],
+        "properties": {
+          "document_url": {
+            "type": "string",
+            "description": "url of the document that should be processed"
+          },
+          "next_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "optional tag to apply to document when finished with processing, if unspecified the configured finish tag will be set"
+          },
+          "template": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "optional jinja-style template for title formatting, e.g. \"{{correspondent}} - {{date}} - {{subject}}\". If unspecified, a single free-form title is generated."
+          }
+        }
+      },
       "WebhookParams": {
         "type": "object",
         "description": "General webhook parameters any workflow trigger will accept this type",
