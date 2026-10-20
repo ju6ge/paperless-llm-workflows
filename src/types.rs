@@ -588,9 +588,7 @@ pub(crate) fn create_workflow_from_custom_field(
                 as_json: Some(true),
                 params: Some(json!({
                     "document_url":"{{ doc_url }}",
-                    "custom_field_id":custom_field.id,
-                    "prompt": None::<String>,
-                    "longtext_schema": None::<Value>
+                    "custom_field_id": format!("{}",custom_field.id),
                 })),
                 body: None,
                 headers: None,

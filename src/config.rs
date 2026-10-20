@@ -129,7 +129,7 @@ impl OverlayConfig {
                 .ok()
                 .and_then(|num| num.parse().ok()),
             paperless_server: std::env::var("PAPERLESS_SERVER").ok(),
-            webhook_public_base_url: std::env::var("WEBHOOK_PULIC_HOST").ok(),
+            webhook_public_base_url: std::env::var("WEBHOOK_PUBLIC_HOST").ok(),
             processing_tag: std::env::var("PROCESSING_TAG_NAME").ok(),
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),
