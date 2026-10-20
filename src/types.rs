@@ -1,8 +1,13 @@
 use chrono::NaiveDate;
+use log::{error, info};
 use once_cell::sync::Lazy;
-use paperless_api_client::types::{
-    Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, WorkflowActionRequest,
-    WorkflowActionTypeEnum, WorkflowActionWebhookRequest, WorkflowRequest, WorkflowTriggerRequest,
+use paperless_api_client::{
+    Client,
+    types::{
+        Correspondent, CustomField, CustomFieldInstance, DataTypeEnum, Tag, WorkflowActionRequest,
+        WorkflowActionTypeEnum, WorkflowActionWebhookRequest, WorkflowRequest,
+        WorkflowTriggerRequest,
+    },
 };
 use regex::Regex;
 use schemars::{JsonSchema, Schema, json_schema, schema_for};
@@ -10,9 +15,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::server::PaperlessStatusTags;
-
 static TEMPLATE_KEY_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"\{\{(\w+)\}\}");
+
+#[derive(Debug, Clone)]
+pub(crate) struct PaperlessStatusTags {
+    pub processing: Tag,
+    pub finished: Tag,
+    pub error: Option<Tag>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 /// Structure to extract currency data from a document
@@ -507,6 +517,7 @@ pub(crate) fn create_workflow_from_custom_field(
     custom_field: &CustomField,
     status_tags: PaperlessStatusTags,
     webhook_base_url: &String,
+    enabled: bool,
 ) -> WorkflowRequest {
     let mut ignore_tags = vec![status_tags.processing.id];
     if let Some(error_tag) = &status_tags.error {
@@ -515,7 +526,7 @@ pub(crate) fn create_workflow_from_custom_field(
     WorkflowRequest {
         name: format!("🧠 Fill Field `{}`", custom_field.name),
         order: Some(1000),
-        enabled: Some(false),
+        enabled: Some(enabled),
         triggers: vec![
             WorkflowTriggerRequest {
                 id: None,
@@ -625,5 +636,71 @@ pub(crate) fn create_workflow_from_custom_field(
             remove_change_groups: None,
             email: None,
         }],
+    }
+}
+
+pub(crate) async fn sync_custom_field_workflows(
+    client: &mut Client,
+    status_tags: &PaperlessStatusTags,
+    webhook_public_base_url: &str,
+    processing_tag: &Tag,
+    auto_enable_workflows: bool,
+) {
+    let all_supported_custom_fields: Vec<CustomField> =
+        crate::requests::get_all_custom_fields(client)
+            .await
+            .into_iter()
+            .filter(|cf| custom_field_learning_supported(cf))
+            .collect();
+
+    let all_generated_workflows = crate::requests::get_generated_workflow_for_custom_fields(
+        client,
+        &all_supported_custom_fields,
+    )
+    .await;
+
+    let mut all_triggers = Vec::new();
+    for (wf, _cf) in &all_generated_workflows {
+        all_triggers.extend(wf.triggers.clone());
+    }
+
+    if let Some(error_tag) = &status_tags.error {
+        for wf_trigger in all_triggers {
+            if wf_trigger
+                .filter_has_not_tags
+                .as_ref()
+                .is_some_and(|ignored_tag_ids| !ignored_tag_ids.contains(&error_tag.id))
+            {
+                crate::requests::update_workflow_trigger_ignore_tags(
+                    client,
+                    &wf_trigger,
+                    &[processing_tag, error_tag],
+                )
+                .await;
+            }
+        }
+    }
+
+    let mut custom_fields_without_workflow = Vec::new();
+    for cf in &all_supported_custom_fields {
+        let has_workflow = all_generated_workflows
+            .iter()
+            .any(|(_, wf_cf)| *wf_cf == cf);
+        if !has_workflow {
+            custom_fields_without_workflow.push(cf);
+        }
+    }
+
+    for cf in custom_fields_without_workflow {
+        info!("Creating workflow for new custom field: {}", cf.name);
+        let wfr = create_workflow_from_custom_field(
+            cf,
+            status_tags.clone(),
+            &webhook_public_base_url.to_string(),
+            auto_enable_workflows,
+        );
+        if let Err(e) = client.workflows().create(&wfr).await {
+            error!("Failed to create workflow for custom field '{}': {}", cf.name, e);
+        }
     }
 }

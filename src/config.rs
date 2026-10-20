@@ -9,6 +9,8 @@ pub(crate) struct Config {
     pub(crate) port: u16,
     pub(crate) paperless_server: String,
     pub(crate) webhook_public_base_url: Option<String>,
+    pub(crate) workflow_sync_interval_seconds: u64,
+    pub(crate) auto_enable_workflows: bool,
     pub(crate) processing_tag: String,
     pub(crate) processing_color: String,
     pub(crate) finished_tag: String,
@@ -28,6 +30,8 @@ pub(crate) struct OverlayConfig {
     pub(crate) port: Option<u16>,
     pub(crate) paperless_server: Option<String>,
     pub(crate) webhook_public_base_url: Option<String>,
+    pub(crate) workflow_sync_interval_seconds: Option<u64>,
+    pub(crate) auto_enable_workflows: Option<bool>,
     pub(crate) processing_tag: Option<String>,
     pub(crate) processing_color: Option<String>,
     pub(crate) finished_tag: Option<String>,
@@ -56,6 +60,8 @@ impl Config {
             port: 8123,
             paperless_server: "https://example-paperless.domain".to_string(),
             webhook_public_base_url: None,
+            workflow_sync_interval_seconds: 3600,
+            auto_enable_workflows: false,
             processing_tag: "🧠 processing".to_string(),
             processing_color: "#ffe000".to_string(),
             finished_tag: "🏷️ finished".to_string(),
@@ -84,6 +90,12 @@ impl Config {
             } else {
                 self.webhook_public_base_url
             },
+            workflow_sync_interval_seconds: overlay_config
+                .workflow_sync_interval_seconds
+                .unwrap_or(self.workflow_sync_interval_seconds),
+            auto_enable_workflows: overlay_config
+                .auto_enable_workflows
+                .unwrap_or(self.auto_enable_workflows),
             processing_tag: overlay_config.processing_tag.unwrap_or(self.processing_tag),
             processing_color: overlay_config
                 .processing_color
@@ -130,6 +142,12 @@ impl OverlayConfig {
                 .and_then(|num| num.parse().ok()),
             paperless_server: std::env::var("PAPERLESS_SERVER").ok(),
             webhook_public_base_url: std::env::var("WEBHOOK_PUBLIC_HOST").ok(),
+            workflow_sync_interval_seconds: std::env::var("WORKFLOW_SYNC_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|num| num.parse().ok()),
+            auto_enable_workflows: std::env::var("AUTO_ENABLE_WORKFLOWS")
+                .ok()
+                .and_then(|boolean| boolean.parse().ok()),
             processing_tag: std::env::var("PROCESSING_TAG_NAME").ok(),
             processing_color: std::env::var("PROCESSING_TAG_COLOR").ok(),
             finished_tag: std::env::var("FINISHED_TAG_NAME").ok(),

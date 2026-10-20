@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- added periodic workflow sync background task that keeps auto generated custom field workflows in sync with paperless, interval configurable via `workflow_sync_interval_seconds`
+- added `auto_enable_workflows` config option to enable auto generated workflows immediately
+
 ### Fixed
 - fixed bugs with weired paperless API value serialisation and deseralisation
 - fixed targeted custom field endpoint not being enabled
